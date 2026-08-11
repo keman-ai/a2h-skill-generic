@@ -953,6 +953,15 @@ def _profile_login_hint(token: str) -> dict:
 
 # ---------------------------------------------------------------- market / listing
 
+def _card_arg(raw: str | None) -> str | None:
+    """--card 归一化：小写输入自动转大写再传（agent 顺手写小写是常见笔误）。
+
+    刻意**不做**客户端枚举白名单——合法值由服务端校验；客户端硬校验会让
+    服务端新增卡型时旧包先把合法值拦死。"""
+    value = (raw or "").strip()
+    return value.upper() if value else None
+
+
 def _market_list_public(params: dict):
     """匿名公开读。excludeSelf 要算「自己是谁」，公开口子上没有身份，剔掉再发。"""
     return call(api_post(), "GET", "/api/v1/public/listings", auth=False,
@@ -980,7 +989,8 @@ def cmd_market_list(args):
         attr_key, attr_value = k.strip(), v.strip()
     params = {"category": args.category, "keyword": args.keyword, "tag": args.tag,
               "attrKey": attr_key, "attrValue": attr_value,
-              "tradeType": args.trade_type, "page": args.page, "size": args.size}
+              "tradeType": args.trade_type, "card": _card_arg(getattr(args, "card", None)),
+              "page": args.page, "size": args.size}
     if not current_token():
         emit_ok(_market_list_public(params), untrusted=True)
         return
@@ -1307,7 +1317,9 @@ def cmd_listing_create(args):
       （GBP/CNY/…），不传由服务端按站点默认；标签**不走参数**——小红书笔记式，
       在 --description 正文末尾自然带 2–4 个 `#标签`，服务端解析成检索索引；
       --category 是自由文本主分类（从标签里挑最主要的一个，如「厨房」）；
-      --attr 键=值 存开放属性（品牌/容量/入手渠道…抽到什么存什么）。
+      --attr 键=值 存开放属性（品牌/容量/入手渠道…抽到什么存什么）；
+      --card 是帖型（要素卡）大写枚举名——按语义判定传入（SKILL.md「先判卡」），
+      服务端校验取值，小写会被归一成大写。
 
     成交方式：**不传就继承档案的偏好**（`profile set --delivery`），别每条都问；
     这一件跟平时不一样时才用 --delivery 覆盖（大件只能自提、书可以邮寄）。
@@ -1329,7 +1341,8 @@ def cmd_listing_create(args):
             attrs[k.strip()] = v.strip()
     body = {"title": args.title, "description": args.description,
             "category": args.category, "itemCondition": args.condition,
-            "tradeType": args.trade_type, "currency": args.currency,
+            "tradeType": args.trade_type, "card": _card_arg(getattr(args, "card", None)),
+            "currency": args.currency,
             "attributes": attrs,
             "flawNote": args.flaw_note, "price": args.price,
             "negotiable": not args.no_negotiable,
@@ -1371,6 +1384,7 @@ def cmd_listing_update(args):
             attrs[k.strip()] = v.strip()
     body = {"title": args.title, "description": args.description, "price": args.price,
             "negotiable": args.negotiable, "flawNote": args.flaw_note, "attributes": attrs,
+            "card": _card_arg(getattr(args, "card", None)),
             "currency": getattr(args, "currency", None),
             "category": getattr(args, "category", None),
             "itemCondition": getattr(args, "condition", None),
@@ -1744,6 +1758,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="把自己在卖的也列进来（默认排除）")
     ml.add_argument("--trade-type", choices=["SELL", "BUY"], default=None,
                     help="只看某一向；不传 = 买卖混排")
+    ml.add_argument("--card",
+                    help="按帖型（要素卡）过滤，大写枚举名：GOODS/TICKET/LEND/RENTAL/"
+                         "STORAGE/ERRAND/LOCALRUN/HOMESERVICE/PHOTOSHOOT/CONSULTING/"
+                         "PETCARE/COMPANION/CARPOOL/GROUPBUY/JOB/OTHER；"
+                         "小写自动转大写，取值由服务端校验")
     ml.add_argument("--tag", help="按正文 #标签 过滤（服务端解析索引）")
     ml.add_argument("--attr", metavar="键=值",
                     help="按开放属性精确筛选（品牌=BenQ / 尺码=UK4）。键值要成对，"
@@ -1778,6 +1797,12 @@ def build_parser() -> argparse.ArgumentParser:
     lc.add_argument("--no-negotiable", action="store_true")
     lc.add_argument("--trade-type", choices=["SELL", "BUY"], default=None,
                     help="SELL=卖(出闲置，默认) / BUY=买(求购帖)。BUY 时 --price 是预算上限")
+    lc.add_argument("--card",
+                    help="帖型（要素卡），大写枚举名：GOODS/TICKET/LEND/RENTAL/STORAGE/"
+                         "ERRAND/LOCALRUN/HOMESERVICE/PHOTOSHOOT/CONSULTING/PETCARE/"
+                         "COMPANION/CARPOOL/GROUPBUY/JOB/OTHER。按语义判定后传（见 SKILL.md"
+                         "「先判卡」），小写自动转大写，取值由服务端校验；"
+                         "判错了 listing update --card 可改")
     lc.add_argument("--photo-url", action="append")
     lc.set_defaults(fn=cmd_listing_create)
     lm = listing.add_parser("mine")
@@ -1804,6 +1829,11 @@ def build_parser() -> argparse.ArgumentParser:
                                        "£30 被当成 ¥30 展示是很难自查的错")
     lu.add_argument("--attr", action="append", metavar="键=值",
                     help="可重复；开放键值属性（品牌=BenQ 型号=XL2540K-B …）。整组替换")
+    lu.add_argument("--card",
+                    help="改帖型（要素卡），大写枚举名：GOODS/TICKET/LEND/RENTAL/STORAGE/"
+                         "ERRAND/LOCALRUN/HOMESERVICE/PHOTOSHOOT/CONSULTING/PETCARE/"
+                         "COMPANION/CARPOOL/GROUPBUY/JOB/OTHER。建档时判错卡用它纠正；"
+                         "小写自动转大写，取值由服务端校验")
     lu.add_argument("--available-until",
                     help="可交易截止日 ISO 格式（2026-08-19T23:59:59）。原帖写了「可留至 X 日」"
                          "就填它，别用默认的 +14 天——默认值只是没信息时的兜底")

@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.36.0
+  version: 0.37.0
   clawdbot:
     emoji: "🛒"
     requires:
@@ -164,6 +164,40 @@ metadata:
 > 会脏、会跟事实对不上的东西。老用户不想听，一句话就能打断
 > （速览永远让位于用户的事，见 [onboarding.md](references/onboarding.md) 的报到规则）。
 
+## 先判卡（建档类意图的第一步）
+
+用户要**发任何帖**（卖/求购/转租/帮带/拼车/找搭子……）时，先判定这是 15 张
+**要素卡**里哪一张的事，读对应的 card-*.md，再走下面场景路由里的建档工序：
+
+- **判卡依据 = 用户语义，不问用户**（守「一句话就能发」——不要拿"你要发哪类帖"
+  去考用户）；供给/需求两侧同一张卡（方向进卡内的供/需节）；
+- 判定后：建档要素、价格/时间语义、描述骨架、确认门回显行都以**该卡为准**；
+  `listing create` / `listing update` 时把卡的枚举传 `--card`（大写），
+  **判错了 `listing update <id> --card <新值>` 可改**，不用删帖重发；
+- 都对不上 → 无专卡，走通用建档工序，`--card OTHER`（或不传）。
+
+| 用户意图（关键词） | 读哪张卡 | `--card` |
+|---|---|---|
+| 卖闲置 / 清东西 / 清仓合集 / 求购某件实物 | [card-goods.md](references/card-goods.md) | GOODS |
+| 转票 / 出票 / 收票（演出/球赛/火车票） | [card-ticket.md](references/card-ticket.md) | TICKET |
+| 出借 / 求借（学士服/相机/行李箱/工具，不换主） | [card-lend.md](references/card-lend.md) | LEND |
+| 转租 / 招室友 / 短租 / 找房 | [card-rental.md](references/card-rental.md) | RENTAL |
+| 行李寄存 / 求寄存 | [card-storage.md](references/card-storage.md) | STORAGE |
+| 回国/来英航班帮带 / 跨国代购 | [card-errand.md](references/card-errand.md) | ERRAND |
+| 代取 / 代排 / 本地代购 / 单次代办 | [card-localrun.md](references/card-localrun.md) | LOCALRUN |
+| 清洁 / 上门做饭 / 维修组装 / 搬家搬运 / 美业上门 | [card-homeservice.md](references/card-homeservice.md) | HOMESERVICE |
+| 约拍 / 陪拍 / 毕业照摄影 | [card-photoshoot.md](references/card-photoshoot.md) | PHOTOSHOOT |
+| 咨询 / 辅导 / 讲题（代写代考一律不接） | [card-consulting.md](references/card-consulting.md) | CONSULTING |
+| 代喂 / 宠物寄养 | [card-petcare.md](references/card-petcare.md) | PETCARE |
+| 找搭子 / 组局 / 语伴 | [card-companion.md](references/card-companion.md) | COMPANION |
+| 拼车 / 接机 / 送机 | [card-carpool.md](references/card-carpool.md) | CARPOOL |
+| 拼团 / 拼单 / 集运拼箱 | [card-groupbuy.md](references/card-groupbuy.md) | GROUPBUY |
+| 招兼职 / 找兼职（持续受雇；单次帮忙归 homeservice/localrun） | [card-job.md](references/card-job.md) | JOB |
+
+> 边界拿不准时看卡里的「分界一句」（如拼车 vs 拼团 vs 搭子、帮带 vs 跑腿、
+> 跑腿 vs 兼职）。**读帖方向以标题/正文语义为准，card/tradeType 仅参考**
+> （读侧口径见 marketplace.md §B）。
+
 ## 场景路由
 
 | 用户意图 | 读取剧本 |
@@ -172,14 +206,14 @@ metadata:
 | 装不上 / 连不上 / 登录不了 / 报错了怎么办 | **先跑 `python3 scripts/a2hmarket.py doctor`**，再按 [marketplace-config.md](references/marketplace-config.md)（「doctor」「出网策略」「三种登录结果」三节）分流 |
 | 填资料 / 改联系方式 / 别人看不到我微信 / 我在哪儿交易 | [marketplace-config.md](references/marketplace-config.md)（`profile set`） |
 | 认证学校 / 学生认证 / 我是 xx 大学的，怎么证明 | [marketplace-config.md](references/marketplace-config.md)（「学校认证」节，`student link`） |
-| **卖**：想卖闲置 / 清东西 / 断舍离 / 发来物品照片 | [intake.md](references/intake.md) → [pricing.md](references/pricing.md) → [authorization.md](references/authorization.md) |
+| **卖**：想卖闲置 / 清东西 / 断舍离 / 发来物品照片 | [intake.md](references/intake.md) → [pricing.md](references/pricing.md) → [authorization.md](references/authorization.md)（intake=建档工序库，要素以 [card-goods.md](references/card-goods.md) 为准） |
 | 照片在手机上 / 手机怎么发给你 / 手机寄件 | [intake.md](references/intake.md)（收照片·入口引导节） |
 | **卖**：一张照片里好几件 / 拍了一堆你看看 / 帮我拆一下 | [intake.md](references/intake.md)（§2.4 一图多物：拆件 → 确认门 → 出图） |
 | 再给我出一张图 / 出张价签图 / 封面重出一版 | [intake.md](references/intake.md)（§2.4.3；🔴 已经发布过的，**先把帖子描述读回来按清单行的号出图**，读不回来就不出） |
 | 确认托管清单后上架 | [marketplace.md](references/marketplace.md) |
 | **买**：逛集市 / 看看有什么好东西 / 想买 | [marketplace.md](references/marketplace.md)（逛街章节） |
-| **买**：想要个 xx / 帮我盯着 / 有 xx 告诉我 / 发个求购帖 | [marketplace.md](references/marketplace.md)（A2 发求购帖·`listing create --trade-type BUY`） |
-| 找室友 / 转租、短租招租 / 回国帮带、找人代购（供需两侧都算） | [marketplace.md](references/marketplace.md)（§A3 非实物帖——有房间/可帮带 = 卖帖，找房/求帮带 = 求购帖） |
+| **买**：想要个 xx / 帮我盯着 / 有 xx 告诉我 / 发个求购帖 | [marketplace.md](references/marketplace.md)（A2 发求购帖·`listing create --trade-type BUY`；要素以 [card-goods.md](references/card-goods.md) 需求侧为准） |
+| 找室友 / 转租、短租招租 / 回国帮带、找人代购（供需两侧都算） | 先按上面「先判卡」定卡（RENTAL/ERRAND/LOCALRUN/…），再走 [marketplace.md](references/marketplace.md)（§A3 非实物帖公共工序——有房间/可帮带 = 卖帖，找房/求帮带 = 求购帖） |
 | **卖**：谁在收东西 / 有没有人求购我这件 | `market list --trade-type BUY`，命中后按逛街章节开串 |
 | **卖**：东西还在吗 / 帮我续一下 / 帖子快过期 | [marketplace.md](references/marketplace.md)（「还在」确认·续期，`listing confirm`） |
 | 想问卖家 / 想要某件 / 怎么联系卖家 | [marketplace.md](references/marketplace.md)（逛街章节·私密留言串；**转载帖**见 §B3——**不开串**，明确告知无法站内私信，给原帖链接引导去小红书） |

@@ -65,26 +65,10 @@ python3 scripts/a2hmarket.py doctor
 
 ### ① 安装 skill
 
-两种装法，**目录名都必须是 `a2hmarket`**（`SKILL.md` 里的 `name` 就是它；
-装成别的名字，宿主认出来的技能名和 skill 自称的名字对不上）。
-
-**git clone**（推荐，更新只要 `git pull`）：
-
-```bash
-git clone https://github.com/keman-ai/a2h-skill-generic.git ~/.claude/skills/a2hmarket
-```
-
-Codex 换成 `a2h-skill-codex` 仓 + `~/.codex/skills/a2hmarket`。
-
-**或者**把下载解压得到的 `a2hmarket-skill/` 目录放进宿主的 skills 目录并改名为
-`a2hmarket`：
-
+把 `a2hmarket-skill/` 目录放进宿主的 skills 目录：
 - Claude 系：`~/.claude/skills/a2hmarket/`
 - Codex：`~/.codex/skills/a2hmarket/`（由 Codex 自动发现 `SKILL.md`）
 - WorkBuddy：`~/.workbuddy/skills/a2hmarket/`
-
-🔴 **两种装法对应两种更新方式，别混**：git 装的一律 `git pull`；下载装的才走
-「下载覆盖」那套（见下面「更新」一节的判据——看安装目录里有没有 `.git`）。
 
 前置依赖见上面「运行前提」三条（`python3` + HTTPS 出网 + 可写状态目录）。
 拿不准就先 `python3 scripts/a2hmarket.py doctor`。

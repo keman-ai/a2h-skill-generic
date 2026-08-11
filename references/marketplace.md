@@ -33,11 +33,13 @@
 ```bash
 a2hmarket.py listing create \
   --title "松下电饭煲 3L 九成新" --price 30 --currency GBP \
-  --category "厨房" --condition LIGHT_WEAR \
+  --card GOODS --category "厨房" --condition LIGHT_WEAR \
   --description "用了半年无划痕，搬家出。适合自己开火的同学。#厨房 #小家电" \
   --attr 品牌=Panasonic --attr 容量=3L \
   --delivery PICKUP --location "Astor College"
 ```
+   - **`--card` 按判定的卡传大写枚举**（SKILL.md「先判卡」索引；卖闲置/清仓 = GOODS）——
+     判错了 `listing update <id> --card <新值>` 可改，不用删帖重发；
    - **`--price` 可省略 = 面议**（拿不准就先面议上架，见 pricing.md §0）；`--currency`
      用 ISO 代码（伦敦默认 GBP，不传由服务端按站点默认）；
    - **标签写在 `--description` 正文末尾**（`#标签`，2–4 个，小红书笔记式）——没有
@@ -104,7 +106,7 @@ a2hmarket.py listing create … --photo-url "<上一步的 publicUrl>"   # 多�
 
 **改价 / 改描述**：`a2hmarket.py listing update <listing_id> --price 120`
 （还可改 `--title` `--category` `--condition` `--location` `--currency` `--attr` `--meetup`
-`--available-until` `--flaw-note` `--photo-url`。**看清瑕疵后下调 `--condition` 比在
+`--available-until` `--flaw-note` `--photo-url` `--card`（建档时帖型判错用它纠正）。**看清瑕疵后下调 `--condition` 比在
 flaw-note 里打补丁更诚实**——买家看到的成色徽章是那个字段。）
 
 **改状态**：`a2hmarket.py listing status <listing_id> RESERVED|SOLD|GIFTED|OFFLINE`
@@ -160,10 +162,13 @@ a2hmarket.py listing update <listing_id> --description "…
 对话里要一个再重试即可：
 
 ```bash
-a2hmarket.py listing create --trade-type BUY \
+a2hmarket.py listing create --trade-type BUY --card GOODS \
   --title "求购 Kindle Paperwhite" --price 40 --currency GBP --category "数码" --condition LIKE_NEW \
   --description "上课看文献用，几乎全新的就行 #数码 #Kindle" --location "Astor College"
 ```
+
+（`--card` 同样按判定的卡传——实物求购 = GOODS；求帮带/找房这类非实物求购
+按 SKILL.md「先判卡」传对应枚举，走 §A3。）
 
 🔴 **三个字段的意思在求购帖里会翻转**，起草时按这个口径跟用户确认，别照搬卖帖话术：
 
@@ -173,21 +178,9 @@ a2hmarket.py listing create --trade-type BUY \
 | `--condition` | 我这东西什么成色 | **我能接受的最低成色** |
 | `--photo-url` | 实物图 | 「我想要的大概长这样」的参考图；没有就别硬凑 |
 
-**求购要素卡**（0811 拍板：发帖质量机制不再是卖二手专属——软闸口径同 intake.md §2.3，
-不拦发，问过没答的标「未知」照发）：
-
-| 档 | 要素 | 落点 / 处理 |
-|---|---|---|
-| **必须成立** | 要什么（品名+可接受范围，"Kindle 或同类电纸书都行"） | `--title` + 描述；认不出要什么 → 必须问一句 |
-| | 币种 | 只有数字认不出币种 → 必问不默认（同 intake.md §2.1.2，不占追问额度） |
-| **尽量抽取**（缺了标未知照发，不为它问） | 预算上限 | `--price`；没有 = 面议照发 |
-| | 多久内要 | `--available-until`（"下周开学前"→ ISO 日期） |
-| | 交易方式 / 地点 | 继承档案偏好；`--location` 单条可覆盖 |
-| **提了才写**（不主动问） | 用途（"上课看文献"）、品牌偏好、能接受的最低成色 | 描述 / `--condition`——用途帮卖家判断合不合适，但问多了像盘问 |
-
-**描述骨架**（卖家和卖家的 agent 按这个顺序读）：一句"要什么+可接受范围" →
-一句预算/时限/地点 → 用途（提了才写）→ `#标签`（品名中英+短词是检索主键，
-叫法变体规则同 intake.md §2.2）。
+**求购要素与描述骨架见 card-goods.md 需求侧**（要素三态表、到达日维度、骨架
+顺序、标签规则都在卡里，此处不重复——防两处真相。软闸口径同 intake.md §2.3：
+不拦发，问过没答的标「未知」照发；币种必问不默认、不占追问额度，同 intake.md §2.1.2）。
 
 **发前过目 + 口述落位**（工序同 intake.md §5 / §5.0）：发之前把求购卡回显一遍
 （要什么/预算/时限/地点，缺的标「未知」），主人点头才发；主人顺口说的条件
@@ -218,25 +211,37 @@ a2hmarket.py listing create --trade-type BUY \
 集市帖子只有卖（SELL）/ 求购（BUY）两种，但**内容不限于实物**——凡是"发出来等人来
 接头"的事都能发，字段换个读法：
 
-**每型一张要素卡**（0811 拍板：与卖二手同一套质量机制——三态软闸，
-必须成立的缺了问一句、尽量抽取的标「未知」照发、提了才写的绝不主动问）：
+**每型一张要素卡**（与卖二手同一套质量机制——三态软闸：必须成立的缺了问一句、
+尽量抽取的标「未知」照发、提了才写的绝不主动问）。**要素内容都在各卡里，
+本节只留索引与公共工序**（防两处真相）——按 SKILL.md「先判卡」判定后读对应卡，
+发帖带对应 `--card`：
 
-| 场景 | 发哪种帖 | `--price` 读作 | 🔴 必须成立 | 尽量抽取 | 提了才写 | 标签 |
-|---|---|---|---|---|---|---|
-| 有房间找室友 / 转租、短租招租 | SELL | 月租（整段价写描述） | 位置（区域/地铁站级即可）、月租+币种 | 租期起止、房型（几室/几人间/家具）、押金与 bill 谁付、可入住时间 | 室友偏好（性别/作息/宠物/吸烟）；**位置到楼、转租合法性 → 强烈建议补充**（不追问，接头卡上标注：到楼"更容易被联系"、合法性"写一句更可信"，主人自己决定） | `#室友 #短租 #转租` |
-| 在找房 / 找室友 | BUY | 预算上限（月租） | 目标区域、预算 | 入住时段、租期长短 | 硬性要求（独卫/可养宠） | `#找房 #室友` |
-| 回国/来英航班，可帮带 | SELL | 酬劳（或面议） | 两边城市+航班日期 | 可带品类、重量上限、酬劳口径（**走下方计价行约定**：按件/按重量都装得下） | 不带什么（自定红线） | `#帮带 #代购` |
-| 想找人帮带/代购 | BUY | 愿付酬劳 | 时间窗、物品是什么 | 重量/体积、愿付酬劳 | 品牌/店铺参考链接 | `#帮带` |
+| 场景（供需同卡） | 读哪张卡 | `--card` |
+|---|---|---|
+| 转租·招室友 / 找房 | [card-rental.md](card-rental.md) | RENTAL |
+| 帮带 / 求帮带（跨国航线；本地代购归 LOCALRUN） | [card-errand.md](card-errand.md) | ERRAND |
+| 跑腿代办 / 本地代购 | [card-localrun.md](card-localrun.md) | LOCALRUN |
+| 行李寄存 | [card-storage.md](card-storage.md) | STORAGE |
+| 转票 / 收票 | [card-ticket.md](card-ticket.md) | TICKET |
+| 物品租借（学士服/相机/行李箱） | [card-lend.md](card-lend.md) | LEND |
+| 上门服务（清洁/做饭/维修/搬家/美业） | [card-homeservice.md](card-homeservice.md) | HOMESERVICE |
+| 约拍摄影 | [card-photoshoot.md](card-photoshoot.md) | PHOTOSHOOT |
+| 咨询·辅导 | [card-consulting.md](card-consulting.md) | CONSULTING |
+| 宠物照看 | [card-petcare.md](card-petcare.md) | PETCARE |
+| 找搭子 / 语伴 | [card-companion.md](card-companion.md) | COMPANION |
+| 拼车·接送机 | [card-carpool.md](card-carpool.md) | CARPOOL |
+| 拼团 / 集运拼箱 | [card-groupbuy.md](card-groupbuy.md) | GROUPBUY |
+| 兼职招/求 | [card-job.md](card-job.md) | JOB |
 
 **发帖工序（§A3 所有帖型必经——与卖二手同一套机制，只是卡的内容换了）**：
 
-1. **要素按上表三态处理**：必须成立的缺了**合并问一句**（"房子具体在哪栋楼？月租多少？"），
+1. **要素按所读卡的三态表处理**：必须成立的缺了**合并问一句**（"房子具体在哪栋楼？月租多少？"），
    不逐项轰炸；追问上限同 intake.md §3（最多 2 问）；
 2. **口述落位核对**（intake.md §5.0 同款工序）：主人顺口说的条件
    （"最好不养宠物""书桌可以留给下家""洗衣机公用"）逐条核对已落进描述，漏了补上；
 3. **接头卡过目**（确认门，同托管清单的作用）：发前回显一张卡——
    位置/价/租期（或航线/时间窗）/条件，缺的标「未知」让主人自己看见，点头才发；
-   表中标了「强烈建议补充」的项缺失时，在卡上带一句**为什么值得补**
+   要素卡里标了「强烈建议补充」的项缺失时，在卡上带一句**为什么值得补**
    （不是追问，是摆在卡上让主人自己决定——0811 拍板：这类项线上实测零惯例，
    开口问会显得比市场更重）；
 4. 🔴 **带图必过敏感信息检查**（intake.md §4 同款，在 `photo upload` 之前）：
@@ -298,11 +303,19 @@ a2hmarket.py listing create --trade-type BUY \
 
 用户说"逛逛集市 / 有什么好东西 / 想找个 xx"时：
 
-1. 拉在售商品：`a2hmarket.py market list [--keyword xx] [--tag 厨房] [--attr 品牌=BenQ] [--trade-type SELL]`
+1. 拉在售商品：`a2hmarket.py market list [--keyword xx] [--tag 厨房] [--attr 品牌=BenQ] [--trade-type SELL] [--card RENTAL]`
    （`--tag` 走正文 #标签 的解析索引，比 keyword 更准；`--attr 键=值` 按品牌/型号/尺码
-   精确筛；三者可叠加；`--category` 是自由文本主分类的等值匹配，一般用 `--tag` 就够）
+   精确筛；`--card` 按帖型预筛——找房只看 RENTAL、找帮带只看 ERRAND，噪音立减；
+   可叠加；`--category` 是自由文本主分类的等值匹配，一般用 `--tag` 就够）
    （默认已排除自己的；不加 `--trade-type` 是**买卖混排**，只想看别人在卖的就加 `SELL`）；
    详情：`a2hmarket.py market show <listing_id>`（`photos` 字段是公开图片 URL）；
+
+   🔴 **帖子返回里有 `card` 字段（帖型）——先按对应卡的价格/时间语义读**：
+   RENTAL = 周期价（"375"很可能是周租，见 card-rental.md §3 换算口径）、
+   ERRAND/CARPOOL = 计价行（`--price` 只是起步价/人均参考，结构在描述首段）、
+   BUY 侧 = 价格语义翻转（price 是预算不是要价）。`card` 缺省或 OTHER 按 GOODS
+   （一口价实物）读。**读方向仍以标题/正文语义为准，帖型仅参考**——线上"招室友"
+   发成 BUY 带月租要价是常态，照帖型读会把"收 £700/月"读成"预算 £700"；
 
    ### 🔴 怎么搜才搜得到（**一次搜不中≠没有**）
 
