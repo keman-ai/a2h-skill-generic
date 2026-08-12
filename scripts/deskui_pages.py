@@ -215,7 +215,8 @@ def search_view(payload: dict) -> str:
         # 七项①图：没有就出兜底占位块（徽章降级进正文行），**禁止静默变纯文字**
         if item.get("cover"):
             media = (f'<div class="fcard-media">'
-                     f'<img src="{esc(item["cover"])}" alt="" data-ratio>'
+                     f'<img src="{esc(item["cover"])}" alt="" data-ratio '
+                     f'loading="lazy" decoding="async">'
                      f'<div class="fcard-badges">{card_badges(item, on_cover=True)}</div></div>')
             flat_badges = ""
         else:
@@ -265,11 +266,13 @@ def listing_view(payload: dict) -> str:
     if photos:
         thumbs = "".join(
             f'<button type="button" class="gthumb{" on" if i == 0 else ""}" '
-            f'data-thumb="{esc(u)}"><img src="{esc(u)}" alt=""></button>'
+            f'data-thumb="{esc(u)}"><img src="{esc(u)}" alt="" '
+            f'loading="lazy" decoding="async"></button>'
             for i, u in enumerate(photos))
         count = (f'<span class="gcount">1/{len(photos)}</span>' if len(photos) > 1 else "")
         gallery = (f'<div class="gallery"><div class="gmain">'
-                   f'<img id="gmain-img" src="{esc(photos[0])}" alt="" data-ratio>{count}</div>'
+                   f'<img id="gmain-img" src="{esc(photos[0])}" alt="" data-ratio '
+                   f'decoding="async" fetchpriority="high">{count}</div>'
                    + (f'<div class="gthumbs">{thumbs}</div>' if len(photos) > 1 else "")
                    + "</div>")
     else:
@@ -324,17 +327,23 @@ def listing_view(payload: dict) -> str:
     else:
         cta = ""
 
+    loading_state = ('<div class="load-state" role="status">'
+                     '<span class="spinner" aria-hidden="true"></span>'
+                     '<span>正在补全最新详情…</span></div>' if payload.get("loading") else "")
+    load_error = (f'<div class="load-state load-error" role="alert">'
+                  f'{esc(payload.get("loadError"))}</div>' if payload.get("loadError") else "")
+
     return (f'<div class="detail-bar"><button type="button" class="backbtn" '
             f'{act({"type": "back"})} aria-label="返回">‹</button>'
             f'<span class="detail-bar-title">帖子详情</span></div>'
-            f'{gallery}{photo_note}'
+            f'{loading_state}{load_error}{gallery}{photo_note}'
             f'<h1 class="dtitle">{esc(listing.get("title") or FALLBACK["title"])}</h1>'
             f'<div class="dprice-row"><span class="dprice">{esc(price_text(listing))}</span>'
             f'{card_badges(listing, on_cover=False)}</div>'
             f'<div class="dchips">{"".join(chips)}</div>'
             f'{flaw}{repost_alert}{seller_card}'
             f'<div class="desc">{esc(listing.get("description") or FALLBACK["description"])}</div>'
-            f'{cta}{_contacts_modal(payload)}')
+            f'{cta}<div id="overlay-root">{_contacts_modal(payload)}</div>')
 
 
 def _contacts_modal(payload: dict) -> str:
@@ -347,7 +356,13 @@ def _contacts_modal(payload: dict) -> str:
     if not payload.get("contactsOpen"):
         return ""
     contacts = payload.get("contacts") or []
-    if contacts:
+    if payload.get("contactsLoading"):
+        rows = ('<div class="modal-loading" role="status">'
+                '<span class="spinner" aria-hidden="true"></span>'
+                '<span>正在获取联系方式…</span></div>')
+    elif payload.get("contactError"):
+        rows = f'<p class="contact-error" role="alert">{esc(payload["contactError"])}</p>'
+    elif contacts:
         rows = "".join(
             f'<div class="contact-row">'
             f'<span class="contact-type">{esc(CONTACT_TYPE_LABEL.get(c.get("type"), c.get("type")))}</span>'
@@ -364,6 +379,13 @@ def _contacts_modal(payload: dict) -> str:
             f'{rows}'
             f'<button type="button" class="modal-close" {act({"type": "close_contacts"})}>'
             f'关闭</button></div></div>')
+
+
+def render_overlay(state: dict) -> str:
+    """同一详情页内只替换弹层，避免重新创建图片节点与重置图集状态。"""
+    if state.get("view") != "listing":
+        return ""
+    return _contacts_modal(state.get("payload") or {})
 
 
 VIEWS = {"search": search_view, "listing": listing_view}

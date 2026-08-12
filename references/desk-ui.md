@@ -31,24 +31,28 @@ python3 scripts/deskui.py serve
 
 ### 2. 摊第一屏
 
-照 marketplace.md 正常搜（`market list`），挑 5–8 件，逐件写一句你的看法，从 stdin 喂：
+照 marketplace.md 正常搜（`market list`），挑 5–8 件，逐件写一句你的看法，从 stdin 喂。
+**每件把 `market list` 返回的原始公开对象完整放进 `detail`**，不要为了卡片手抄一份精简
+对象；页面点击后会直接用这份快照开详情，不再同步等待一次 `market show`：
 
 ```bash
-echo '{"query":"蓝牙耳机","items":[…]}' | python3 scripts/deskui.py render --view search --url <url>
+echo '{"query":"蓝牙耳机","items":[{"detail":<market list 返回的单件原始对象>,"distanceNote":"离你约 2 公里","aiNote":"价格合适，但先确认电池健康度","url":"<分享页链接>"},…]}' | python3 scripts/deskui.py render --view search --url <url>
 ```
 
-每件的字段（七项硬校验 + 帖型三字段）：
+每件的字段（`detail` 提供七项硬校验 + 帖型字段，其余是 agent 的增补）：
 
 | 载荷字段 | 说明 | 取不到时 |
 |---|---|---|
-| `listingId` | 必填 | 缺了整条被丢弃 |
-| `cover` | 封面图（只收 `https://`，`photos[0]`） | `null` + `coverNote` 说明原因 |
-| `title` / `price` / `currency` | 标题、价格 | `price: null` 页面写「面议」 |
-| `card` / `tradeType` / `status` | **服务端原值直接透传**——徽章文案、价格修饰（/月、起、预算）、状态标签全由页面按帖型表计算，你不要替页面翻译 | 缺了按 GOODS/SELL/在售 |
-| `itemCondition` | 成色原始枚举（页面自己翻中文，且按帖型决定显不显示） | `null` → 「成色未知」 |
-| `location` / `distanceNote` | 位置 + 离主人远近 | 主人没留常驻地就 `distanceNote: null`，**别硬算** |
-| `seller.nickname` / `.verifiedSchool` / `.tag` / `.isRepost` | 卖家信息 | 都没有 → 页面写「卖家未留背景」 |
-| `aiNote` + `url` | **你的看法必须自己写**（页面兜不了）+ 分享页链接 | — |
+| `detail` | `market list` 返回的**单件原始公开对象**，原样放入；至少含 `listingId`，并让 `photos`、标题/价格、帖型、描述、卖家、交付方式等详情字段一起保留 | 缺 `listingId` 整条丢弃；只传旧版精简字段仍兼容，但点详情会先显示骨架并后台补全 |
+| `distanceNote` | 离主人远近，只是 agent 的补充判断 | 主人没留常驻地就 `null`，**别硬算** |
+| `seller.tag` | 只有你确有额外且可公开的卖家标签时才补；昵称、学校、转载判定直接取 `detail` | 没有就省略 |
+| `coverNote` | 仅在 `detail.photos[0]` 不可用时说明封面缺失原因 | 没有就省略 |
+| `aiNote` | **你的看法必须自己写**（页面兜不了） | — |
+| `url` | 商品分享页链接 | 没有就省略 |
+
+兼容旧调用：把 `listingId` / `photos` / `title` 等公开字段铺在 item 同层仍能显示，但新调用
+统一用 `detail`，避免复制时漏字段。sidecar 只会从 `detail` 取 `ListingDTO` 公开白名单；
+**不要**把其他 agent 上下文或主人的私有数据塞进去。
 
 `aiNote` 就是你在聊天里本来要说的那句话：说人话、给依据、两件各有优劣就摆明取舍。
 🔴 **别把主人的私有定价策略写进 `aiNote`**（定义见 [pricing.md](pricing.md)）——页面随时

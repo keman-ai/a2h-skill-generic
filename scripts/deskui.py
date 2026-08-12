@@ -43,10 +43,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from deskui_pages import HINTS, render_fragment, render_page
+    from deskui_pages import HINTS, render_fragment, render_overlay, render_page
 except ModuleNotFoundError:  # 直接 import 本模块的测试没带 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from deskui_pages import HINTS, render_fragment, render_page
+    from deskui_pages import HINTS, render_fragment, render_overlay, render_page
 
 PROTOCOL = "a2hmarket-deskui/v1"
 
@@ -57,6 +57,19 @@ LONG_POLL_SECONDS = 25
 IDLE_EXIT_SECONDS = 30 * 60
 # 子进程超时。逛集市那一发最慢（服务端要搜索），给足。
 CLI_TIMEOUT = 60
+# 搜索接口本身已经返回完整公开 DTO。刚 render 完的一屏直接把这份快照当详情用，
+# 不要用户一点击又同步重取；超过这段时间仍先画快照，再在后台校准。
+DETAIL_SNAPSHOT_TTL_SECONDS = 30
+
+# ListingDTO 的公开字段白名单。搜索载荷即便混进别的 agent 上下文字段，也只能有这些
+# 进入详情快照；这与 normalize_search 只挑卡片字段是同一条结构性隐私边界。
+PUBLIC_LISTING_FIELDS = (
+    "listingId", "sellerUserId", "sellerNickname", "sellerVerifiedSchool",
+    "tradeType", "card", "title", "description", "tags", "attributes",
+    "category", "itemCondition", "flawNote", "currency", "price", "negotiable",
+    "deliveryMethods", "meetupAreas", "location", "status", "photos",
+    "commentCount", "viewCount", "refreshedAt", "availableUntil", "createdAt", "updatedAt",
+)
 
 
 class DeskError(Exception):
@@ -167,6 +180,7 @@ class Session:
         self.lock = threading.Condition()
         self.session_id = secrets.token_hex(8)
         self.revision = 0
+        self.update_scope = "full"
         # 单窗口：view ∈ search | listing（私信页面 0812 拍板下线）。
         # revision 只在内容变化时 bump（事件/锁机制删除后没有别的写入源），
         # 所以页面收到新状态就换 HTML，不需要第二个游标。
@@ -177,6 +191,13 @@ class Session:
         #    payload["_search"] 里，open_listing 一整体替换 payload 它就没了，
         #    「← 返回搜索结果」回到的是一屏空白（0812 修）。
         self.search_payload: dict = {"query": None, "items": []}
+        # listingId → {listing, complete, cached_at, is_mine}。只存公开 DTO 白名单，
+        # 随 Session 一起消失；搜索换屏时整张表替换。
+        self.detail_snapshots: dict[str, dict] = {}
+        self.contact_cache: dict[str, list] = {}
+        self.search_epoch = 0
+        self.navigation_epoch = 0
+        self.next_operation_id = 1
         self.last_touch = time.monotonic()
         self._mine: set[str] | None = None
 
@@ -197,7 +218,7 @@ class Session:
                 self._mine = set()
         return self._mine
 
-    def legal_actions(self) -> list[dict]:
+    def _legal_actions_locked(self) -> list[dict]:
         """当前页面允许提交的动作**全集**。
 
         🔴 页面能做什么由这里说了算，不由页面上画了什么按钮说了算。
@@ -217,36 +238,69 @@ class Session:
                                 "listingId": listing.get("listingId")})
         return actions
 
-    def human_state(self) -> dict:
+    def legal_actions(self) -> list[dict]:
+        with self.lock:
+            return self._legal_actions_locked()
+
+    def _human_state_locked(self) -> dict:
         """给页面的那份。
 
         🔴 **只给渲染好的 HTML，不给 payload** —— 页面拿不到原始载荷，也就无从
         「自己再渲一遍」。这是「一套模板」这条纪律的结构性保证：想在页面上多显示
         一个字段，只能去改 Python 模板，不可能在 JS 里偷偷加一份。
         """
+        state = {"view": self.view, "payload": self.payload}
         return {"protocol": PROTOCOL, "session_id": self.session_id,
-                "revision": self.revision,
+                "revision": self.revision, "update_scope": self.update_scope,
                 "view": self.view, "hint": HINTS.get(self.view, ""),
-                "html": render_fragment({"view": self.view, "payload": self.payload})}
+                "html": render_fragment(state),
+                "overlay_html": render_overlay(state)}
+
+    def human_state(self) -> dict:
+        with self.lock:
+            return self._human_state_locked()
 
     def render_state(self) -> dict:
         """整页渲染要的那份（带 payload，只在进程内用，不出网）。"""
-        return {"protocol": PROTOCOL, "session_id": self.session_id,
-                "revision": self.revision,
-                "view": self.view, "payload": self.payload}
+        with self.lock:
+            return {"protocol": PROTOCOL, "session_id": self.session_id,
+                    "revision": self.revision,
+                    "view": self.view, "payload": self.payload}
 
     # -------- 写（都要持锁）
 
-    def _bump(self) -> None:
+    def _bump(self, update_scope: str = "full") -> None:
         self.revision += 1
+        self.update_scope = update_scope
         self.last_touch = time.monotonic()
         self.lock.notify_all()
 
-    def set_view(self, view: str, payload: dict) -> None:
+    def _set_view_locked(self, view: str, payload: dict,
+                         update_scope: str = "full") -> None:
+        self.view = view
+        self.payload = payload
+        self._bump(update_scope)
+
+    def set_view(self, view: str, payload: dict, update_scope: str = "full") -> None:
         with self.lock:
-            self.view = view
-            self.payload = payload
-            self._bump()
+            self._set_view_locked(view, payload, update_scope)
+
+    def _validate_human_action_locked(self, body: dict) -> dict:
+        action = body.get("action")
+        if not isinstance(action, dict):
+            raise DeskError(400, "缺 action")
+        expected = body.get("expected_revision")
+        if expected is not None and int(expected) != self.revision:
+            raise DeskError(409, f"状态已经变了（现在 revision={self.revision}）")
+        if action not in self._legal_actions_locked():
+            raise DeskError(422, "这个动作不在当前页面的允许动作集里")
+        return action
+
+    def _new_navigation_locked(self) -> tuple[int, int]:
+        self.navigation_epoch += 1
+        operation_id = self.next_operation_id
+        self.next_operation_id += 1
+        return self.navigation_epoch, operation_id
 
     # -------- 长轮询
 
@@ -261,13 +315,14 @@ class Session:
                     return None
                 self.lock.wait(remaining)
                 self.last_touch = time.monotonic()
-            return self.human_state()
+            return self._human_state_locked()
 
 
 # ---------------------------------------------------------------- 视图装配
 
 
-def build_listing_view(session: Session, listing_id: str) -> dict:
+def listing_view_payload(listing: dict, *, is_mine: bool = False,
+                         loading: bool = False, load_error: str | None = None) -> dict:
     """详情页载荷。CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx）：
 
     ① 自己的帖子       → 没有 CTA（Web 端 isOwner → null）
@@ -276,15 +331,102 @@ def build_listing_view(session: Session, listing_id: str) -> dict:
                           再画一颗点不动的按钮只是制造虚假预期 —— Web 端原话）
     ④ 正常             → 「查看联系方式」（0812 拍板：替代私信入口，邮箱排最前）
     """
+    repost, repost_url = repost_source(listing)
+    return {"listing": listing, "isMine": is_mine, "isRepost": repost,
+            "repostUrl": repost_url,
+            "canContact": not loading and not is_mine and not repost,
+            "contacts": None, "contactsOpen": False, "contactsLoading": False,
+            "contactError": None, "loading": loading, "loadError": load_error}
+
+
+def build_listing_view(session: Session, listing_id: str) -> dict:
+    """兼容 agent 直接 render listing 的同步路径；网页点卡不走这里。"""
     listing = a2hmarket("market", "show", listing_id)
     if not isinstance(listing, dict):
         raise DeskError(502, "集市返回的商品详情不是一个对象")
     mine = str(listing.get("listingId")) in session.mine()
-    repost, repost_url = repost_source(listing)
-    return {"listing": listing, "isMine": mine, "isRepost": repost,
-            "repostUrl": repost_url,
-            "canContact": not mine and not repost,
-            "contacts": None, "contactsOpen": False}
+    return listing_view_payload(listing, is_mine=mine)
+
+
+def _preview_listing(item: dict) -> dict:
+    """精简卡也能立刻画一个详情骨架；远端补全在后台进行。"""
+    cover = item.get("cover")
+    seller = item.get("seller") or {}
+    return {"listingId": item.get("listingId"), "title": item.get("title"),
+            "price": item.get("price"), "currency": item.get("currency"),
+            "card": item.get("card"), "tradeType": item.get("tradeType"),
+            "status": item.get("status"), "itemCondition": item.get("itemCondition"),
+            "location": item.get("location"), "photos": [cover] if cover else [],
+            "sellerNickname": seller.get("nickname"),
+            "sellerVerifiedSchool": seller.get("verifiedSchool")}
+
+
+def _start_background(name: str, target) -> None:
+    """页面动作先返回；慢 I/O 在 daemon 线程里补齐，进程退出时不拖住。"""
+    threading.Thread(target=target, name=name, daemon=True).start()
+
+
+def _refresh_listing(session: Session, listing_id: str, navigation_epoch: int,
+                     search_epoch: int, is_mine: bool) -> None:
+    try:
+        listing = a2hmarket("market", "show", listing_id)
+        if not isinstance(listing, dict):
+            raise DeskError(502, "集市返回的商品详情不是一个对象")
+    except Exception as error:  # noqa: BLE001 —— 后台线程不能静默死掉，把骨架永远留在加载态
+        with session.lock:
+            if (session.navigation_epoch != navigation_epoch or session.view != "listing"
+                    or str((session.payload.get("listing") or {}).get("listingId")) != listing_id):
+                return
+            # 有完整快照时后台校准失败不降级已经可看的页面；只有骨架态才显式报错。
+            if not session.payload.get("loading"):
+                return
+            payload = dict(session.payload)
+            payload["loading"] = False
+            payload["loadError"] = str(error)
+            session._set_view_locked("listing", payload)
+        return
+
+    fresh = {"listing": listing, "complete": True, "cached_at": time.monotonic(),
+             "is_mine": is_mine}
+    with session.lock:
+        if session.search_epoch == search_epoch:
+            session.detail_snapshots[listing_id] = fresh
+        # 较慢的旧点击回来时不能覆盖用户后来打开的商品或已经返回的搜索页。
+        if (session.navigation_epoch != navigation_epoch or session.view != "listing"
+                or str((session.payload.get("listing") or {}).get("listingId")) != listing_id):
+            return
+        payload = listing_view_payload(listing, is_mine=is_mine)
+        # 详情校准与弹层数据请求可以同时在路上。校准只换商品正文，不能顺手关闭
+        # 已经打开的弹层、清掉它的 loading/error，或让迟到结果改写用户刚做的操作。
+        for key in ("contacts", "contactsOpen", "contactsLoading", "contactError"):
+            if key in session.payload:
+                payload[key] = session.payload[key]
+        cached_contacts = session.contact_cache.get(listing_id)
+        if cached_contacts is not None:
+            payload["contacts"] = cached_contacts
+        session._set_view_locked("listing", payload)
+
+
+def _refresh_contacts(session: Session, listing_id: str, navigation_epoch: int) -> None:
+    try:
+        contacts = a2hmarket("market", "contacts", listing_id)
+        contacts = contacts if isinstance(contacts, list) else []
+        error_message = None
+    except Exception as error:  # noqa: BLE001 —— 与详情刷新同理，不能把弹层永久卡在 loading
+        contacts = []
+        error_message = str(error)
+
+    with session.lock:
+        if error_message is None:
+            session.contact_cache[listing_id] = contacts
+        if (session.navigation_epoch != navigation_epoch or session.view != "listing"
+                or str((session.payload.get("listing") or {}).get("listingId")) != listing_id):
+            return
+        payload = dict(session.payload)
+        payload["contactsLoading"] = False
+        payload["contactError"] = error_message
+        payload["contacts"] = contacts
+        session._set_view_locked("listing", payload, "overlay")
 
 
 # ---------------------------------------------------------------- HTTP
@@ -387,39 +529,71 @@ def handle_human_action(session: Session, body: dict) -> dict:
     """页面提交的动作。**全部由 sidecar 自理**（0.38.1 起没有 agent-bound 动作）。
 
     两层裁决：乐观并发（409）→ `legal_actions` 逐字段比对（不在表里 → 422）。
+    两步必须与状态推进在同一个锁里；否则两个 revision=0 的并发点击会双双通过。
     """
-    action = body.get("action")
-    if not isinstance(action, dict):
-        raise DeskError(400, "缺 action")
-    kind = action.get("type")
+    background = None
+    operation_id = None
+    with session.lock:
+        action = session._validate_human_action_locked(body)
+        kind = action.get("type")
 
-    expected = body.get("expected_revision")
-    if expected is not None and int(expected) != session.revision:
-        raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
+        if kind == "open_listing":
+            listing_id = str(action["listingId"])
+            navigation_epoch, operation_id = session._new_navigation_locked()
+            entry = session.detail_snapshots.get(listing_id)
+            item = next((candidate for candidate in session.search_payload.get("items", [])
+                         if str(candidate.get("listingId")) == listing_id), {})
+            listing = dict(entry["listing"]) if entry else _preview_listing(item)
+            is_mine = bool(entry and entry.get("is_mine"))
+            complete = bool(entry and entry.get("complete"))
+            payload = listing_view_payload(listing, is_mine=is_mine, loading=not complete)
+            cached_contacts = session.contact_cache.get(listing_id)
+            if cached_contacts is not None:
+                payload["contacts"] = cached_contacts
+            session._set_view_locked("listing", payload)
 
-    if action not in session.legal_actions():
-        raise DeskError(422, "这个动作不在当前页面的允许动作集里")
+            age = time.monotonic() - float(entry.get("cached_at", 0)) if entry else float("inf")
+            if not complete or age > DETAIL_SNAPSHOT_TTL_SECONDS:
+                search_epoch = session.search_epoch
+                background = (f"deskui-detail-{operation_id}",
+                              lambda: _refresh_listing(session, listing_id, navigation_epoch,
+                                                       search_epoch, is_mine))
+        elif kind == "back":
+            session._new_navigation_locked()  # 让仍在路上的详情结果自动失效
+            session._set_view_locked("search", session.search_payload)
+        elif kind == "view_contacts":
+            listing_id = str(action["listingId"])
+            payload = dict(session.payload)
+            cached = session.contact_cache.get(listing_id)
+            payload["contactsOpen"] = True
+            if cached is not None:
+                payload["contacts"] = cached
+                payload["contactsLoading"] = False
+                payload["contactError"] = None
+            elif not payload.get("contactsLoading"):
+                payload["contactsLoading"] = True
+                payload["contactError"] = None
+                operation_id = session.next_operation_id
+                session.next_operation_id += 1
+                navigation_epoch = session.navigation_epoch
+                background = (f"deskui-contacts-{operation_id}",
+                              lambda: _refresh_contacts(session, listing_id, navigation_epoch))
+            session._set_view_locked("listing", payload, "overlay")
+        elif kind == "close_contacts":
+            payload = dict(session.payload)
+            payload["contactsOpen"] = False
+            session._set_view_locked("listing", payload, "overlay")
+        else:
+            raise DeskError(422, f"未知动作 {kind}")
+        state = session._human_state_locked()
 
-    if kind == "open_listing":
-        session.set_view("listing", build_listing_view(session, action["listingId"]))
-    elif kind == "back":
-        session.set_view("search", session.search_payload)
-    elif kind == "view_contacts":
-        # 0812 拍板：CTA 直接展示发帖人联系方式。取一次缓存在载荷里（同 Web 端行为），
-        # 关掉再开不重复打服务端 —— 配额是按查看者计次的，别替主人浪费。
-        payload = dict(session.payload)
-        if payload.get("contacts") is None:
-            contacts = a2hmarket("market", "contacts", action["listingId"])
-            payload["contacts"] = contacts if isinstance(contacts, list) else []
-        payload["contactsOpen"] = True
-        session.set_view("listing", payload)
-    elif kind == "close_contacts":
-        payload = dict(session.payload)
-        payload["contactsOpen"] = False
-        session.set_view("listing", payload)
-    else:
-        raise DeskError(422, f"未知动作 {kind}")
-    return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
+    if background is not None:
+        _start_background(*background)
+    result = {"ok": True, "handled_by": "sidecar", "revision": state["revision"],
+              "state": state}
+    if operation_id is not None:
+        result["operation_id"] = operation_id
+    return result
 
 
 def handle_agent_action(session: Session, body: dict, server) -> dict:
@@ -427,13 +601,13 @@ def handle_agent_action(session: Session, body: dict, server) -> dict:
     action = body.get("action")
     if not isinstance(action, dict):
         raise DeskError(400, "缺 action")
-    expected = body.get("expected_revision")
-    if expected is not None and int(expected) != session.revision:
-        raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
-
     kind = action.get("type")
     if kind == "stop":
-        server.should_stop.set()
+        with session.lock:
+            expected = body.get("expected_revision")
+            if expected is not None and int(expected) != session.revision:
+                raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
+            server.should_stop.set()
         return {"ok": True, "stopping": True}
     if kind != "render":
         raise DeskError(422, f"agent 只能 render / stop（收到 {kind}）")
@@ -441,15 +615,34 @@ def handle_agent_action(session: Session, body: dict, server) -> dict:
     view = action.get("view")
     result = {"ok": True}
     if view == "search":
-        payload = normalize_search(action.get("payload") or {})
-        # 🔴 搜索结果只此一份、独立于当前视图存活：新搜索替换它，返回时复用它
-        session.search_payload = payload
-        session.set_view("search", payload)
+        payload, snapshots = normalize_search_bundle(action.get("payload") or {})
+        with session.lock:
+            expected = body.get("expected_revision")
+            if expected is not None and int(expected) != session.revision:
+                raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
+            # 🔴 搜索结果只此一份、独立于当前视图存活：新搜索替换它，返回时复用它
+            session.search_epoch += 1
+            session._new_navigation_locked()
+            session.detail_snapshots = snapshots
+            session.search_payload = payload
+            session._set_view_locked("search", payload)
+            revision = session.revision
     elif view == "listing":
-        session.set_view("listing", build_listing_view(session, action["listingId"]))
+        # agent 直接点名一件时仍走兼容路径；慢请求结束后再原子校验 revision，
+        # 期间若人已经操作过就回 409，不能用旧结果覆盖新页面。
+        payload = build_listing_view(session, action["listingId"])
+        with session.lock:
+            expected = body.get("expected_revision")
+            if expected is not None and int(expected) != session.revision:
+                raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
+            session._new_navigation_locked()
+            session._set_view_locked("listing", payload)
+            revision = session.revision
     else:
         raise DeskError(422, f"未知视图 {view}")
-    result.update({"revision": session.revision, "view": view})
+    # agent 只收小回执；整页 HTML 若从 CLI stdout 回显，会白白进入模型上下文耗 token。
+    # 浏览器自己的动作响应才直接带 state，后台变化仍由页面长轮询接收。
+    result.update({"revision": revision, "view": view})
     return result
 
 
@@ -459,6 +652,85 @@ def handle_agent_action(session: Session, body: dict, server) -> dict:
 # 成色是唯一合法缺席：showCondition=false 的帖型（转租/帮带/跑腿…）不出成色 ——
 # 「转租 · 全新」这类错位比缺席更误导，帖型显隐表在 deskui_pages.CARD_META。
 SEVEN_FIELDS = ("cover", "title", "price", "itemCondition", "location", "seller", "aiNote")
+_DETAIL_COMPLETENESS_FIELDS = {"description", "photos", "sellerUserId", "deliveryMethods"}
+
+
+def _value(raw: dict, detail: dict, key: str):
+    return raw.get(key) if key in raw else detail.get(key)
+
+
+def _normalize_card(raw: dict, detail: dict) -> dict | None:
+    listing_id = _value(raw, detail, "listingId")
+    if not listing_id:
+        return None
+    seller = raw.get("seller") or {}
+    photos = _value(raw, detail, "photos") or []
+    cover = raw.get("cover") or (photos[0] if photos else None)
+    listing_for_repost = dict(detail)
+    listing_for_repost.update({key: raw[key] for key in
+                               ("title", "description", "attributes") if key in raw})
+    return {
+        "listingId": str(listing_id),
+        "cover": cover if str(cover or "").startswith("https://") else None,
+        "coverNote": raw.get("coverNote"),
+        "title": _value(raw, detail, "title"),
+        "price": _value(raw, detail, "price"),
+        "currency": _value(raw, detail, "currency"),
+        "card": _value(raw, detail, "card"),
+        "tradeType": _value(raw, detail, "tradeType"),
+        "status": _value(raw, detail, "status"),
+        "itemCondition": _value(raw, detail, "itemCondition"),
+        "location": _value(raw, detail, "location"),
+        "distanceNote": raw.get("distanceNote"),
+        "seller": {
+            "verifiedSchool": (seller.get("verifiedSchool")
+                               or _value(raw, detail, "sellerVerifiedSchool")),
+            "tag": seller.get("tag"),
+            "nickname": seller.get("nickname") or _value(raw, detail, "sellerNickname"),
+            "isRepost": bool(seller.get("isRepost") or is_repost(listing_for_repost)),
+        },
+        "aiNote": raw.get("aiNote"),
+        "url": raw.get("url"),
+    }
+
+
+def _normalize_detail_snapshot(raw: dict, detail: dict, card: dict) -> dict:
+    # 显式 detail 优先表达「这是 market list 的原始公开 DTO」；为兼容旧调用，原始字段
+    # 直接铺在 card 同层也认。卡片上的补充值最后覆盖，避免两个视图标题/价格不一致。
+    source = dict(detail)
+    source.update({key: raw[key] for key in PUBLIC_LISTING_FIELDS if key in raw})
+    listing = {key: source.get(key) for key in PUBLIC_LISTING_FIELDS if key in source}
+    listing.update({key: card.get(key) for key in
+                    ("listingId", "title", "price", "currency", "card", "tradeType",
+                     "status", "itemCondition", "location") if card.get(key) is not None})
+    if not listing.get("photos") and card.get("cover"):
+        listing["photos"] = [card["cover"]]
+    seller = card.get("seller") or {}
+    if not listing.get("sellerNickname") and seller.get("nickname"):
+        listing["sellerNickname"] = seller["nickname"]
+    if not listing.get("sellerVerifiedSchool") and seller.get("verifiedSchool"):
+        listing["sellerVerifiedSchool"] = seller["verifiedSchool"]
+    complete_source = detail if detail else raw
+    complete = _DETAIL_COMPLETENESS_FIELDS.issubset(complete_source.keys())
+    return {"listing": listing, "complete": complete,
+            "cached_at": time.monotonic() if complete else 0,
+            "is_mine": bool(raw.get("isMine") or detail.get("isMine"))}
+
+
+def normalize_search_bundle(payload: dict) -> tuple[dict, dict[str, dict]]:
+    """返回页面卡片 + 同批公开详情快照；两份都经过显式字段白名单。"""
+    items = []
+    snapshots = {}
+    for raw in payload.get("items") or []:
+        if not isinstance(raw, dict):
+            continue
+        detail = raw.get("detail") if isinstance(raw.get("detail"), dict) else {}
+        card = _normalize_card(raw, detail)
+        if card is None:
+            continue
+        items.append(card)
+        snapshots[card["listingId"]] = _normalize_detail_snapshot(raw, detail, card)
+    return {"query": payload.get("query"), "items": items}, snapshots
 
 
 def normalize_search(payload: dict) -> dict:
@@ -469,33 +741,7 @@ def normalize_search(payload: dict) -> dict:
     card / tradeType / status 直接透传服务端原值：徽章文案、价格修饰、状态标签
     全部由模板按 CARD_META 计算，agent 不需要也不允许替页面翻译这些。
     """
-    items = []
-    for raw in payload.get("items") or []:
-        listing_id = raw.get("listingId")
-        if not listing_id:
-            continue
-        seller = raw.get("seller") or {}
-        items.append({
-            "listingId": str(listing_id),
-            "cover": raw.get("cover") if str(raw.get("cover") or "").startswith("https://") else None,
-            "coverNote": raw.get("coverNote"),
-            "title": raw.get("title"),
-            "price": raw.get("price"),
-            "currency": raw.get("currency"),
-            "card": raw.get("card"),
-            "tradeType": raw.get("tradeType"),
-            "status": raw.get("status"),
-            "itemCondition": raw.get("itemCondition"),
-            "location": raw.get("location"),
-            "distanceNote": raw.get("distanceNote"),
-            "seller": {"verifiedSchool": seller.get("verifiedSchool"),
-                       "tag": seller.get("tag"),
-                       "nickname": seller.get("nickname"),
-                       "isRepost": bool(seller.get("isRepost"))},
-            "aiNote": raw.get("aiNote"),
-            "url": raw.get("url"),
-        })
-    return {"query": payload.get("query"), "items": items}
+    return normalize_search_bundle(payload)[0]
 
 
 # ---------------------------------------------------------------- serve

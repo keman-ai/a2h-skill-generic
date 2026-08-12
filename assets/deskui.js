@@ -7,6 +7,7 @@
 
   var boot = JSON.parse(document.getElementById('boot').textContent || '{}');
   var revision = boot.revision || 0;
+  var currentView = boot.view || 'search';
   var toastTimer = null;
 
   var params = new URLSearchParams(location.search);
@@ -48,30 +49,55 @@
   }
 
   function applyState(state) {
+    if (!state || state.revision <= revision) { return; }
+    var previousRevision = revision;
+    var sameView = currentView === state.view;
     revision = state.revision;
-    /* 打开弹层等局部变化也整段换 HTML —— 一套模板的代价，滚动位置用前后快照兜住 */
+    /* 局部补丁只对它的直接前序状态安全；若长轮询合并跳过了中间 revision，
+       必须用完整 HTML 追平，不能把新弹层贴到旧详情正文上。 */
+    if (sameView && state.update_scope === 'overlay' &&
+        state.revision === previousRevision + 1) {
+      var overlay = document.getElementById('overlay-root');
+      if (overlay) { overlay.innerHTML = state.overlay_html || ''; return; }
+    }
+    /* 切屏或详情正文更新才整段换 HTML；滚动位置用前后快照兜住。 */
     var y = window.scrollY;
     var hadModal = !!document.querySelector('.modal-backdrop');
     var view = document.getElementById('view');
     view.innerHTML = state.html;
+    currentView = state.view;
     watchRatios(view);
     var hasModal = !!view.querySelector('.modal-backdrop');
     if (hadModal !== hasModal) { window.scrollTo(0, y); }
     else { window.scrollTo(0, 0); }
   }
 
-  function submit(action) {
+  function submit(action, source) {
+    if (source) {
+      source.classList.add('is-pending');
+      source.setAttribute('aria-busy', 'true');
+    }
+    function clearPending() {
+      if (!source) { return; }
+      source.classList.remove('is-pending');
+      source.removeAttribute('aria-busy');
+    }
     api('/api/human-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action, expected_revision: revision })
     }).then(function (response) {
-      if (response.ok) { return; }
       response.json().then(function (payload) {
+        clearPending();
+        if (response.ok) {
+          /* 动作响应直接带新状态，切屏不必再等那条长轮询往返。 */
+          applyState(payload.state);
+          return;
+        }
         /* 409 = 状态刚被推进，长轮询马上带来新状态，不当错误惊动人 */
         if (response.status !== 409) { showToast(payload.error || ('操作失败 ' + response.status)); }
-      }).catch(function () {});
-    }).catch(function () { setLive(false); });
+      }).catch(function () { clearPending(); });
+    }).catch(function () { clearPending(); setLive(false); });
   }
 
   /* ── 点击转发：一切动作都从服务端渲染的 data-act 里取，页面自己造不出动作。
@@ -80,7 +106,15 @@
     var target = event.target.closest('[data-act]');
     if (!target) { return; }
     if (target.hasAttribute('data-backdrop') && event.target.closest('.modal-card')) { return; }
-    submit(JSON.parse(target.getAttribute('data-act')));
+    submit(JSON.parse(target.getAttribute('data-act')), target);
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter' && event.key !== ' ') { return; }
+    var target = event.target.closest('[role="button"][data-act]');
+    if (!target) { return; }
+    event.preventDefault();
+    submit(JSON.parse(target.getAttribute('data-act')), target);
   });
 
   /* 复制联系方式：页面唯一的本地行为（不产生回传动作）。按钮短暂变「已复制」。 */
@@ -104,7 +138,10 @@
     var thumb = event.target.closest('[data-thumb]');
     if (!thumb) { return; }
     var main = document.getElementById('gmain-img');
-    if (main) { main.src = thumb.getAttribute('data-thumb'); }
+    if (main) {
+      main.addEventListener('load', function () { clampRatio(main); }, { once: true });
+      main.src = thumb.getAttribute('data-thumb');
+    }
     document.querySelectorAll('.gthumb').forEach(function (button) {
       button.classList.toggle('on', button === thumb);
     });
