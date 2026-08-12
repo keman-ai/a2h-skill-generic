@@ -1,7 +1,7 @@
 /* desk UI 样式 —— 对齐 Web 端移动档（frontend/src/ui/tokens/*，2026-08-12 快照）。
    只做移动端布局：内容容器 640px（--narrow-max）居中，横向 padding 16px 只此一层。
-   浅色单主题（Web 端本来就没有暗色模式）。玻璃只有两档（卡片 .6/15px、导航 .75/25px），
-   必配 1px 纯白描边 —— 别发明第三档。价格色是全站唯一暖色，只给价格。 */
+   浅色单主题（Web 端本来就没有暗色模式）。玻璃卡一档（.6/15px），
+   必配 1px 纯白描边 —— 别发明第二档。价格色是全站唯一暖色，只给价格。 */
 
 :root{
   --yx-bg:#f0f0f3; --yx-card:#fff; --yx-ink:#000; --yx-ink-hover:#1a1a1a;
@@ -11,7 +11,7 @@
   --yx-tag:#8266ff; --yx-tag-strong:#6a4fe0;
   --yx-tag-bg:rgba(130,102,255,.08); --yx-tag-bg-strong:rgba(130,102,255,.10);
   --yx-price:#ff4920; --text-inverse:#fff;
-  --glass-card:rgba(255,255,255,.6); --glass-nav:rgba(255,255,255,.75); --glass-line:#fff;
+  --glass-card:rgba(255,255,255,.6); --glass-line:#fff;
   --shadow-card:0 4px 24px rgba(0,0,0,.04); --shadow-btn:0 4px 12px rgba(0,0,0,.1);
   --shadow-cta:0 8px 24px rgba(0,0,0,.18);
   --r-pill:999px; --r-card:16px; --r-inner:14px; --r-media:20px;
@@ -153,29 +153,29 @@ button{font:inherit;cursor:pointer}
 .cta:hover{background:var(--yx-ink-hover)}
 .cta:disabled{opacity:.5;cursor:not-allowed}
 .cta-link{text-decoration:none;box-sizing:border-box}
-.cta-blocked{margin:8px 0 0;text-align:center;font-size:12px;color:var(--yx-muted)}
 
-/* ── AI 忙碌提示条（0.38.1：不再整页锁定，只锁 AI 动作按钮） ──
-   顶部浮条讲清「AI 接下来会做什么」；页面其余部分照常可点。 */
-.busybar{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:50;
-  display:flex;align-items:center;gap:10px;max-width:min(560px,calc(100vw - 32px));
-  border-radius:var(--r-card);border:1px solid var(--glass-line);
-  background:var(--glass-nav);-webkit-backdrop-filter:blur(25px);backdrop-filter:blur(25px);
-  box-shadow:var(--shadow-cta);padding:10px 14px}
-.busybar[hidden]{display:none}
-.busybar-text{min-width:0;font-size:12px;line-height:1.5;color:var(--text-75)}
-.busy-since{margin-left:6px;font-size:11px;color:var(--yx-faint);
-  font-variant-numeric:tabular-nums;white-space:nowrap}
-.busy-unlock{flex:none;border:1px solid var(--yx-line);border-radius:var(--r-pill);
-  background:var(--yx-card);padding:5px 12px;font-size:12px;color:var(--text-75)}
-.spinner{display:inline-block;flex:none;width:16px;height:16px;border-radius:50%;
-  border:2.5px solid var(--yx-tag-bg-strong);border-top-color:var(--yx-tag-strong);
-  animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-/* busy 期间 AI 动作按钮置灰（data-agent 由服务端模板标记）；点击由 JS 拦下出 toast */
-body.busy [data-agent]{opacity:.45;cursor:not-allowed}
+/* ── 联系方式弹层（对齐 Web 端 0812 定稿：玻璃卡置中、邮箱最前、逐条复制） ── */
+.modal-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:center;
+  justify-content:center;background:rgba(20,20,24,.45);padding:16px}
+.modal-card{width:100%;max-width:360px;border-radius:var(--r-media);
+  border:1px solid var(--glass-line);background:var(--yx-bg);padding:20px;
+  box-shadow:var(--shadow-cta)}
+.modal-title{margin:0;font-size:15px;font-weight:600;color:var(--yx-ink)}
+.modal-hint{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--yx-muted)}
+.contact-row{display:flex;align-items:center;gap:8px;margin-top:8px;
+  border-radius:var(--r-inner);border:1px solid var(--yx-line-weak);padding:8px 12px}
+.contact-row:first-of-type{margin-top:12px}
+.contact-type{flex:none;font-size:12px;color:var(--yx-muted)}
+.contact-value{min-width:0;flex:1;font-size:13px;color:var(--yx-ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.copybtn{flex:none;border:0;border-radius:var(--r-pill);background:var(--black-05);
+  padding:4px 10px;font-size:11px;color:var(--yx-ink)}
+.contact-empty{margin:12px 0 0;font-size:12px;color:var(--yx-muted)}
+.modal-close{display:block;width:100%;margin-top:16px;border:0;
+  border-radius:var(--r-pill);background:var(--yx-ink);color:var(--text-inverse);
+  padding:10px 0;font-size:13px}
 
-/* 轻提示（点灰按钮 / 423 时出现，2.5s 自散） */
+/* 轻提示（动作失败时出现，2.5s 自散） */
 .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);z-index:60;
   max-width:calc(100vw - 48px);border-radius:var(--r-pill);background:rgba(0,0,0,.82);
   color:var(--text-inverse);padding:10px 18px;font-size:13px;line-height:1.5;

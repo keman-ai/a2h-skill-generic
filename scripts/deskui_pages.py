@@ -84,6 +84,12 @@ CURRENCY_SYMBOL = {"CNY": "¥", "GBP": "£", "USD": "$", "EUR": "€", "HKD": "H
 CONDITION_LABEL = {"NEW": "全新", "LIKE_NEW": "几乎全新", "LIGHT_WEAR": "轻微使用痕迹",
                    "VISIBLE_WEAR": "明显使用痕迹", "FLAWED": "能用有瑕疵"}
 
+# 移植自 frontend/src/pages/ListingDetail.tsx 的 CONTACT_TYPE_LABEL（防漂移闸对照 TS 源码）。
+# 开放小写串，表外类型原样展示；邮箱在最前由服务端排序保证，模板照序渲染即可。
+CONTACT_TYPE_LABEL = {"email": "邮箱", "wechat": "微信", "wechat_qr": "微信二维码",
+                      "xiaohongshu": "小红书", "whatsapp": "WhatsApp",
+                      "instagram": "Instagram", "phone": "电话"}
+
 
 def condition_label(value) -> str:
     return CONDITION_LABEL.get(value, str(value)) if value else ""
@@ -303,23 +309,20 @@ def listing_view(payload: dict) -> str:
                    + (f'<span class="verify">🎓 {esc(verified)}</span>' if verified else "")
                    + "</div>")
 
-    # CTA 三分支（对齐 ListingDetail.tsx 的 ctaLabel 分支）：
-    # ① 正常 → 「让 AI 帮我聊聊」（agent-bound：data-agent 标记，busy 时页面把它置灰）
-    # ② 转载 → 与 Web 端一致**跳转原帖**；老数据没链接时不出按钮（上方 Alert 已给指引，
-    #    再画一颗点不动的按钮只是制造虚假预期 —— Web 端原话）
-    # ③ 自己的帖子 → 禁用 + 说明为什么
-    if payload.get("canNegotiate"):
-        cta = (f'<div class="cta-dock"><button type="button" class="cta" data-agent="1" '
-               f'{act({"type": "ai_negotiate", "listingId": listing.get("listingId")})}>'
-               f'让 AI 帮我聊聊</button></div>')
-    elif payload.get("isRepost"):
-        cta = ((f'<div class="cta-dock"><a class="cta cta-link" '
-                f'href="{esc(payload["repostUrl"])}" target="_blank" rel="noreferrer">'
-                f'去小红书原帖联系卖家</a></div>') if payload.get("repostUrl") else "")
+    # CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx，null = 这一态没有 CTA）：
+    # ① 自己的帖子 → 无 CTA；② 转载有链接 → 外跳原帖；③ 转载没链接 → 无 CTA
+    # （上方 Alert 已给「去小红书搜原作者」指引）；④ 正常 → 「查看联系方式」
+    # （0812 拍板：替代私信入口，弹层展示、邮箱最前）。
+    if payload.get("canContact"):
+        cta = (f'<div class="cta-dock"><button type="button" class="cta" '
+               f'{act({"type": "view_contacts", "listingId": listing.get("listingId")})}>'
+               f'查看联系方式</button></div>')
+    elif payload.get("isRepost") and payload.get("repostUrl"):
+        cta = (f'<div class="cta-dock"><a class="cta cta-link" '
+               f'href="{esc(payload["repostUrl"])}" target="_blank" rel="noreferrer">'
+               f'去小红书原帖联系卖家</a></div>')
     else:
-        # 🔴 不给入口时也要说清为什么（自己的帖子），不是画个灰按钮了事
-        cta = (f'<div class="cta-dock"><button type="button" class="cta" disabled>让 AI 帮我聊聊</button>'
-               f'<p class="cta-blocked">{esc(payload.get("blockedReason") or "")}</p></div>')
+        cta = ""
 
     return (f'<div class="detail-bar"><button type="button" class="backbtn" '
             f'{act({"type": "back"})} aria-label="返回">‹</button>'
@@ -331,12 +334,41 @@ def listing_view(payload: dict) -> str:
             f'<div class="dchips">{"".join(chips)}</div>'
             f'{flaw}{repost_alert}{seller_card}'
             f'<div class="desc">{esc(listing.get("description") or FALLBACK["description"])}</div>'
-            f'{cta}')
+            f'{cta}{_contacts_modal(payload)}')
+
+
+def _contacts_modal(payload: dict) -> str:
+    """联系方式弹层（对齐 ListingDetail.tsx 的弹层：邮箱最前提示、逐条复制、关闭）。
+
+    服务端渲染：数据在 sidecar 取好放进载荷才出现这一段；「复制」按钮是页面上
+    唯一的本地行为（clipboard，deskui.js 处理 data-copy），不产生回传动作。
+    点背板关闭 = `close_contacts` 动作（卡片内的点击不冒泡到背板，JS 判 data-backdrop）。
+    """
+    if not payload.get("contactsOpen"):
+        return ""
+    contacts = payload.get("contacts") or []
+    if contacts:
+        rows = "".join(
+            f'<div class="contact-row">'
+            f'<span class="contact-type">{esc(CONTACT_TYPE_LABEL.get(c.get("type"), c.get("type")))}</span>'
+            f'<span class="contact-value">{esc(c.get("value"))}</span>'
+            f'<button type="button" class="copybtn" data-copy="{esc(c.get("value"))}">复制</button>'
+            f'</div>'
+            for c in contacts if isinstance(c, dict) and c.get("value"))
+    else:
+        rows = '<p class="contact-empty">发帖人没留下联系方式</p>'
+    return (f'<div class="modal-backdrop" {act({"type": "close_contacts"})} data-backdrop>'
+            f'<div class="modal-card" role="dialog" aria-modal="true" aria-label="发帖人联系方式">'
+            f'<p class="modal-title">联系方式</p>'
+            f'<p class="modal-hint">优先用邮箱联系——对方不常上站也能收到。</p>'
+            f'{rows}'
+            f'<button type="button" class="modal-close" {act({"type": "close_contacts"})}>'
+            f'关闭</button></div></div>')
 
 
 VIEWS = {"search": search_view, "listing": listing_view}
 
-HINTS = {"search": "点一张卡看详情", "listing": "想聊就点「让 AI 帮我聊聊」"}
+HINTS = {"search": "点一张卡看详情", "listing": "想联系发帖人就点「查看联系方式」"}
 
 TITLE = "A2H Market · 摊开看"
 
@@ -358,12 +390,6 @@ SHELL = """<!doctype html>
 <div class="shell">
   <div id="view">__VIEW__</div>
 </div>
-<div id="busybar" class="busybar" hidden>
-  <span class="spinner" aria-hidden="true"></span>
-  <span class="busybar-text"><span id="busy-hint"></span>
-  <span class="busy-since" id="busy-since"></span></span>
-  <button type="button" class="busy-unlock" id="busy-unlock" hidden>解除</button>
-</div>
 <div id="toast" class="toast" role="status" hidden></div>
 <script type="application/json" id="boot">__BOOT__</script>
 <script src="/assets/deskui.js?k=__TOKEN__"></script>
@@ -376,10 +402,8 @@ def render_page(state: dict, token: str) -> str:
     （CSP 下不执行、不需要内联脚本）。集市文本以 JSON 字符串身份进数据岛，
     `</` 拆开防止商品描述里的 `</script>` 提前关掉标签。"""
     boot = {"revision": int(state.get("revision", 0)),
-            "view_rev": int(state.get("view_rev", 0)),
             "view": state.get("view"),
-            "hint": HINTS.get(state.get("view"), ""),
-            "busy": state.get("busy")}
+            "hint": HINTS.get(state.get("view"), "")}
     boot_json = json.dumps(boot, ensure_ascii=False).replace("</", "<\\/")
     return (SHELL
             .replace("__TITLE__", TITLE)

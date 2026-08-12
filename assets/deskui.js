@@ -1,17 +1,12 @@
-/* desk UI 页面脚本。刻意保持薄：长轮询换片段、转发点击、忙碌提示条、
+/* desk UI 页面脚本。刻意保持薄：长轮询换片段、转发点击、复制联系方式、
    图片比例钳制 —— 没有第二套模板（HTML 全部由服务端渲染，见 deskui_pages.py 头注）。
    通过 CSP 外置加载；启动状态从 #boot JSON 数据岛读（CSP 下不执行、无内联脚本）。
-
-   长轮询等在**全局** revision 上（busy 的灰/亮要即刻反映），但只有 view_rev
-   变了才换 HTML —— 否则每次灰/亮都会冲掉图集选中态和滚动位置。 */
+   0.38.1 起页面没有任何会惊动 agent 的动作 —— 事件流/忙碌提示条的代码随之删除。 */
 (function () {
   'use strict';
 
   var boot = JSON.parse(document.getElementById('boot').textContent || '{}');
   var revision = boot.revision || 0;
-  var viewRev = boot.view_rev || 0;
-  var busyState = null;
-  var busyShownAt = null;
   var toastTimer = null;
 
   var params = new URLSearchParams(location.search);
@@ -36,28 +31,6 @@
     toastTimer = setTimeout(function () { toast.hidden = true; }, 2500);
   }
 
-  /* ── AI 忙碌提示条：busy 来自服务端状态；只灰 AI 按钮不锁页面；
-     90 秒后追加手动解除按钮（agent 可能死了） ── */
-  function renderBusy(busy) {
-    busyState = busy || null;
-    document.body.classList.toggle('busy', !!busy);
-    var bar = document.getElementById('busybar');
-    if (!bar) { return; }
-    if (!busy) { bar.hidden = true; busyShownAt = null; return; }
-    bar.hidden = false;
-    document.getElementById('busy-hint').textContent = busy.hint || 'AI 正在进行你的上一个指令…';
-    if (busyShownAt === null) { busyShownAt = Date.now() - (busy.sinceSeconds || 0) * 1000; }
-  }
-
-  setInterval(function () {
-    if (busyShownAt === null) { return; }
-    var seconds = Math.floor((Date.now() - busyShownAt) / 1000);
-    var since = document.getElementById('busy-since');
-    if (since) { since.textContent = '已等待 ' + seconds + ' 秒'; }
-    var unlock = document.getElementById('busy-unlock');
-    if (unlock) { unlock.hidden = seconds < 90; }
-  }, 1000);
-
   /* ── 图片比例钳制（对 lib/imageRatio.ts 的移植）：3:4 ~ 4:3 之间用原比例，
      超界钳到边界裁切；未知时 CSS 里的 4:3 兜底 ── */
   function clampRatio(img) {
@@ -76,47 +49,55 @@
 
   function applyState(state) {
     revision = state.revision;
-    renderBusy(state.busy || null);
-    /* 内容没变就不动 DOM —— 别冲掉图集选中态和滚动位置 */
-    if (state.view_rev === viewRev) { return; }
-    viewRev = state.view_rev;
+    /* 打开弹层等局部变化也整段换 HTML —— 一套模板的代价，滚动位置用前后快照兜住 */
+    var y = window.scrollY;
+    var hadModal = !!document.querySelector('.modal-backdrop');
     var view = document.getElementById('view');
     view.innerHTML = state.html;
     watchRatios(view);
-    window.scrollTo(0, 0);
+    var hasModal = !!view.querySelector('.modal-backdrop');
+    if (hadModal !== hasModal) { window.scrollTo(0, y); }
+    else { window.scrollTo(0, 0); }
   }
 
-  function showError(message) {
-    showToast(message);
-  }
-
-  function submit(action, onDone) {
+  function submit(action) {
     api('/api/human-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action, expected_revision: revision })
     }).then(function (response) {
-      if (response.ok) { if (onDone) { onDone(true); } return; }
+      if (response.ok) { return; }
       response.json().then(function (payload) {
-        /* 409 = 状态刚被推进，长轮询马上带来新状态，不当错误惊动人；
-           423 = AI 还在进行上一个指令 —— 轻提示即可 */
-        if (response.status === 423) { showToast(payload.error || 'AI 正在进行你的上一个指令'); }
-        else if (response.status !== 409) { showError(payload.error || ('操作失败 ' + response.status)); }
-        if (onDone) { onDone(false); }
-      }).catch(function () { if (onDone) { onDone(false); } });
-    }).catch(function () { setLive(false); if (onDone) { onDone(false); } });
+        /* 409 = 状态刚被推进，长轮询马上带来新状态，不当错误惊动人 */
+        if (response.status !== 409) { showToast(payload.error || ('操作失败 ' + response.status)); }
+      }).catch(function () {});
+    }).catch(function () { setLive(false); });
   }
 
   /* ── 点击转发：一切动作都从服务端渲染的 data-act 里取，页面自己造不出动作。
-     busy 期间 AI 按钮（data-agent）本地拦下出 toast —— 服务端 423 仍是权威闸 ── */
+     背板（data-backdrop）只在点它本体时触发 —— 弹层卡片里的点击不算 ── */
   document.addEventListener('click', function (event) {
     var target = event.target.closest('[data-act]');
     if (!target) { return; }
-    if (busyState && target.hasAttribute('data-agent')) {
-      showToast('AI 正在进行你的上一个指令 —— 等它完成再点，浏览不受影响');
-      return;
-    }
+    if (target.hasAttribute('data-backdrop') && event.target.closest('.modal-card')) { return; }
     submit(JSON.parse(target.getAttribute('data-act')));
+  });
+
+  /* 复制联系方式：页面唯一的本地行为（不产生回传动作）。按钮短暂变「已复制」。 */
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-copy]');
+    if (!button) { return; }
+    var value = button.getAttribute('data-copy');
+    var done = function () {
+      var original = button.textContent;
+      button.textContent = '已复制';
+      setTimeout(function () { button.textContent = original; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done, function () { showToast('复制失败，手动选中吧'); });
+    } else {
+      showToast('这个浏览器不支持一键复制，手动选中吧');
+    }
   });
 
   document.addEventListener('click', function (event) {
@@ -134,14 +115,8 @@
     }
   });
 
-  document.addEventListener('click', function (event) {
-    if (event.target.id !== 'busy-unlock') { return; }
-    submit({ type: 'unlock' });
-  });
-
   /* ── 对称长轮询：25s 无变化服务端回 204，立刻重发；断连指数退避到 5s 封顶 ── */
   watchRatios(document);
-  renderBusy(boot.busy || null);
   var backoff = 1000;
   (function poll() {
     api('/api/state?after=' + revision).then(function (response) {

@@ -1014,6 +1014,18 @@ def cmd_market_show(args):
     emit_ok(data, untrusted=True)
 
 
+def cmd_market_contacts(args):
+    """发帖人联系方式（0812 拍板：详情页私信链路停用，改为直接展示，邮箱排最前）。
+
+    登录态接口。护栏全在服务端（SellerContactService）：转载帖拒绝（真卖家在小红书，
+    运营号的联系方式不吐）、终态帖拒绝、查看者日配额频控 —— 拒绝时的业务错误
+    message 是给用户看的口径，原样透传即可，别在这层兜。
+    """
+    data = call(api_post(), "GET",
+                f"/api/v1/listings/{args.listing_id}/seller-contacts")
+    emit_ok(data, untrusted=True)
+
+
 # ---------------------------------------------------------------- photo 直传
 #
 # 三步契约（仓根 README「照片直传的三步契约」为准）：
@@ -1849,6 +1861,9 @@ def build_parser() -> argparse.ArgumentParser:
     ms = market.add_parser("show")
     ms.add_argument("listing_id")
     ms.set_defaults(fn=cmd_market_show)
+    mc = market.add_parser("contacts", help="发帖人联系方式（登录态；邮箱排最前）")
+    mc.add_argument("listing_id")
+    mc.set_defaults(fn=cmd_market_contacts)
 
     listing = sub.add_parser("listing").add_subparsers(dest="sub", required=True)
     lc = listing.add_parser("create")
