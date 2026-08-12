@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.38.0
+  version: 0.37.1
   clawdbot:
     emoji: "🛒"
     requires:
@@ -172,6 +172,9 @@ metadata:
 
 - **判卡依据 = 用户语义，不问用户**（守「一句话就能发」——不要拿"你要发哪类帖"
   去考用户）；供给/需求两侧同一张卡（方向进卡内的供/需节）；
+- **混合帖按主体归卡**（0811 拍板）：出衣服顺带说"回国可代购"→ 主体是出物，
+  归 GOODS，代购意向照常写进描述；三条实测边界：住宿预订转让（酒店房券/单晚）
+  → RENTAL、餐厅代金券 → GOODS、演出/球赛/交通票 → TICKET；
 - 判定后：建档要素、价格/时间语义、描述骨架、确认门回显行都以**该卡为准**；
   `listing create` / `listing update` 时把卡的枚举传 `--card`（大写），
   **判错了 `listing update <id> --card <新值>` 可改**，不用删帖重发；
@@ -212,8 +215,7 @@ metadata:
 | **卖**：一张照片里好几件 / 拍了一堆你看看 / 帮我拆一下 | [intake.md](references/intake.md)（§2.4 一图多物：拆件 → 确认门 → 出图） |
 | 再给我出一张图 / 出张价签图 / 封面重出一版 | [intake.md](references/intake.md)（§2.4.3；🔴 已经发布过的，**先把帖子描述读回来按清单行的号出图**，读不回来就不出） |
 | 确认托管清单后上架 | [marketplace.md](references/marketplace.md) |
-| **买**：逛集市 / 看看有什么好东西 / 想买 / 帮我看看有没有 xx | [marketplace.md](references/marketplace.md)（逛街章节）**＋ 只要要把搜索结果给主人看，默认同时走 [desk-ui.md](references/desk-ui.md)** 把结果摊成本机网页（支持范围：macOS 上的 Claude Code Desktop / Codex Desktop，环境门在 desk-ui.md 第 0 步；不过就只走 marketplace.md，不提这个功能） |
-| 摊开给我看 / 开个页面 / 我想边看边挑 / 用界面给我看 | [desk-ui.md](references/desk-ui.md)（同上，主人明说时更要开） |
+| **买**：逛集市 / 看看有什么好东西 / 想买 | [marketplace.md](references/marketplace.md)（逛街章节） |
 | **买**：想要个 xx / 帮我盯着 / 有 xx 告诉我 / 发个求购帖 | [marketplace.md](references/marketplace.md)（A2 发求购帖·`listing create --trade-type BUY`；要素以 [card-goods.md](references/card-goods.md) 需求侧为准） |
 | 找室友 / 转租、短租招租 / 回国帮带、找人代购（供需两侧都算） | 先按上面「先判卡」定卡（RENTAL/ERRAND/LOCALRUN/…），再走 [marketplace.md](references/marketplace.md)（§A3 非实物帖公共工序——有房间/可帮带 = 卖帖，找房/求帮带 = 求购帖） |
 | **卖**：谁在收东西 / 有没有人求购我这件 | `market list --trade-type BUY`，命中后按逛街章节开串 |

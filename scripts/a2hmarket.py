@@ -1450,34 +1450,6 @@ def cmd_message_inbox(_args):
     emit_ok(data, untrusted=True)
 
 
-def cmd_message_conversations(args):
-    """我的会话列表：我参与的**所有**串（帖主侧 + 访客侧合一），按最后一条倒序。
-
-    🔴 **别和 `message inbox` 搞混** —— 这两条的语义差一个「非自己发」，
-       而那个差别正好在最常见的场景里咬人：
-
-       | 命令 | 服务端语义 | 什么时候用 |
-       |---|---|---|
-       | `inbox` | 我参与的、**非我发的**、晚于 since 的留言 | 开场巡查「有没有人找我」 |
-       | `conversations` | 我参与的**全部**串摘要（含只有我说过话的） | 「我有哪些串」——私信页左栏 |
-
-       所以**刚 `message send` 开完一条新串，立刻查 `inbox` 返回空是对的**，不是丢数据、
-       更不是服务端坏了：那条串里唯一一句话就是我自己发的。0811 desk UI 首测就栽在这：
-       私信页拿 inbox 建列表，于是刚发完的串在页面上显示「还没有私信」，
-       一路被误判成服务端故障。
-
-    每条自带 lastContent / lastCreatedAt / status / myRole / peerNickname，
-    列表页要的东西一次拿齐，不用再逐串去 `message thread`。
-
-    ⚠️ `myRole` / `lastSenderRole` 是**结构**角色（SELLER=帖主 / BUYER=访客），
-       求购帖上与业务角色相反（见 `_trade_role`）。只判「这条是不是我发的」时
-       结构对结构比即可，别在那里做业务角色换算。
-    """
-    data = call(api_post(), "GET", "/api/v1/messages/conversations",
-                params={"page": args.page, "size": args.size})
-    emit_ok(data, untrusted=True)
-
-
 def cmd_message_thread(args):
     data = call(api_post(), "GET", f"/api/v1/messages/threads/{args.thread_id}")
     emit_ok(data, untrusted=True)
@@ -1953,14 +1925,6 @@ def build_parser() -> argparse.ArgumentParser:
     msg.add_parser("inbox",
                    help="别人发给我的留言（**不含自己发的**，查不了「我问过谁」）"
                    ).set_defaults(fn=cmd_message_inbox)
-    # conversations 是**私信页**的列表口（双向合一、带最后一条预览）——desk UI 用。
-    # 「发私信前的去重」不用它，用 `message mine`（那才是完备口，见 cmd_message_mine）。
-    mconv = msg.add_parser("conversations",
-                           help="我参与的全部串摘要（双向合一，desk UI 私信页的列表口）。"
-                                "去重用 mine，查未读用 inbox")
-    mconv.add_argument("--page", type=int)
-    mconv.add_argument("--size", type=int)
-    mconv.set_defaults(fn=cmd_message_conversations)
     msg.add_parser("pending").set_defaults(fn=cmd_message_pending)
     mmine = msg.add_parser("mine", help="我问过谁：我开过的串（首条），发私信前的去重口")
     mmine.add_argument("--listing", help="只看这件商品下我开过的串（发私信前去重直接用它）")
