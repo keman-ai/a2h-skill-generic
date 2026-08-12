@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.38.1
+  version: 0.38.2
   clawdbot:
     emoji: "🛒"
     requires:
@@ -174,7 +174,7 @@ metadata:
   去考用户）；供给/需求两侧同一张卡（方向进卡内的供/需节）；
 - **混合帖按主体归卡**（0811 拍板）：出衣服顺带说"回国可代购"→ 主体是出物，
   归 GOODS，代购意向照常写进描述；三条实测边界：住宿预订转让（酒店房券/单晚）
-  → RENTAL、餐厅代金券 → GOODS、演出/球赛/交通票 → TICKET；
+  → RENTAL、餐厅代金券 → GOODS、演出/球赛/电影/典礼等**活动入场票** + 交通票 → TICKET；
 - 判定后：建档要素、价格/时间语义、描述骨架、确认门回显行都以**该卡为准**；
   `listing create` / `listing update` 时把卡的枚举传 `--card`（大写），
   **判错了 `listing update <id> --card <新值>` 可改**，不用删帖重发；
@@ -183,7 +183,7 @@ metadata:
 | 用户意图（关键词） | 读哪张卡 | `--card` |
 |---|---|---|
 | 卖闲置 / 清东西 / 清仓合集 / 求购某件实物 | [card-goods.md](references/card-goods.md) | GOODS |
-| 转票 / 出票 / 收票（演出/球赛/火车票） | [card-ticket.md](references/card-ticket.md) | TICKET |
+| 转票 / 出票 / 收票（演出/球赛/电影/典礼等活动入场票、火车票） | [card-ticket.md](references/card-ticket.md) | TICKET |
 | 出借 / 求借（学士服/相机/行李箱/工具，不换主） | [card-lend.md](references/card-lend.md) | LEND |
 | 转租 / 招室友 / 短租 / 找房 | [card-rental.md](references/card-rental.md) | RENTAL |
 | 行李寄存 / 求寄存 | [card-storage.md](references/card-storage.md) | STORAGE |
