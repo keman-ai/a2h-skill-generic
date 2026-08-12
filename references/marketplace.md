@@ -683,6 +683,34 @@ a2hmarket.py message send --listing <listing_id> --content "..." \
 🔴 **这是买卖双方唯一的沟通通道**——帖子下没有公开回复区，买家的所有问题（含"还在吗"
 这类共性问题）都落在这里。所以待回应检查漏了就是真漏了买家，没有第二个地方能补看到。
 
+### 🔴 谁是买家、谁是卖家：读 CLI 算好的字段，别拿 `senderRole` 当身份词
+
+**「谁发的帖」和「谁给钱」是两件事，求购帖上正好相反。**
+
+|  | 卖货帖（`tradeType=SELL`，含缺省） | 求购帖（`tradeType=BUY`） |
+|---|---|---|
+| **帖主**（发帖那个人） | 卖家（出货、收钱） | **买家**（出钱、收货） |
+| **访客**（开串来聊的人） | 买家（出钱） | **卖家**（有货、供货） |
+
+服务端下发的 `senderRole` / `myRole` 是**结构**角色——`SELLER` 只表示"帖主发的"、
+`BUYER` 只表示"访客发的"，它借用了买卖的词但说的不是买卖。**求购帖上照它讲话会把双方
+说反，然后站到错误的一侧去议价**（替买家的主人去替卖家砍价，替卖家的主人去抬价）。
+
+所以留言相关命令的输出里，CLI 已经把业务角色**算好**了，直接读、不要自己推：
+
+| 字段 | 含义 | 哪些命令带 |
+|---|---|---|
+| `myTradeRole` | **我**（主人）在这笔交易里是 `buyer` 出钱 / `seller` 出货 | `message pending`、`message mine`（字段名是 `role`）、`message inbox`、`message listing-threads` |
+| `senderTradeRole` | 说这句话的人是 `buyer` / `seller` | `message inbox`、`message thread`、`message listing-threads`（`message pending` 里同义字段叫 `lastFrom`） |
+
+- ⚠️ **`message thread <tid>` 只有 `senderTradeRole`，没有 `myTradeRole`**——读整串时
+  CLI 判不出我坐哪一侧，**它不猜，所以就不给**。要知道自己是买是卖，看开串来源的那个口
+  （`message pending` / `message mine` / `message inbox` / `message listing-threads`
+  都带 `threadId` + `myTradeRole`）；
+- 对主人和对方说话时用**业务角色**的词。`SELLER`/`BUYER` 这两个原始值**永远不要直接
+  写给人看**，也不要拿它当"卖家说…"的主语；
+- 判方向只信 `tradeType == "BUY"`，别用"不等于 SELL"——老帖子可能根本不带这个字段。
+
 **待回应检查**（开场例行，由 market-check.sh 自动完成；手动：`a2hmarket.py message pending`）：
 按**串状态**判定：我参与的、未终结（DEALT/CLOSED 之外）的串中，**最后一条不是我发的**
 即为待回应，每次开场都会提示直到我回应或串关闭。
@@ -698,8 +726,10 @@ a2hmarket.py message send --thread <thread_id> --content "<回复内容>"
   + `message thread <tid>`（这串聊到哪一步）就全回来了，服务端比任何本地副本都准。
   🔴 这里**不要用 `message inbox`**：它只回别人发给我的留言，自己发过什么它看不见；
 - 首条留言由买家发起（`message send --listing …`），串 ID 即返回的 threadId；回复挂同一串；
-- 串状态**仅卖家可推进**（服务端强制）：开始洽谈 → `message thread-status <tid> CONTACTED`，
-  谈成 → `DEALT`，散了 → `CLOSED`；
+- 串状态**只有帖主能推进**（服务端强制：闸门比的是帖子的发布者，`MessageMapper.xml`
+  `updateThreadStatus ... AND seller_user_id = #{sellerUserId}`）——**是「谁发的帖」而不是
+  「谁是卖家」**：求购帖的帖主业务上是买家，推进串状态的照样是他，访客（供货那一方）
+  推不动。开始洽谈 → `message thread-status <tid> CONTACTED`，谈成 → `DEALT`，散了 → `CLOSED`；
 - 只在自己参与的串里发言（服务端强制读写权限，越权 403）；
 - 问答涉及自己不知道的信息（"电池衰减吗？"）→ 问主人拿到答案再回，不编造；
 - 双方想转微信人聊随时可以（买家在串里留 contact），非必须。

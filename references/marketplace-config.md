@@ -72,7 +72,7 @@ python3 scripts/a2hmarket.py listing create …  # 上架（完整命令表见 m
    家目录只读的托管沙箱（ChatGPT 的 Web Work 一类）默认不满足这条，
    要显式走 `auth login --session`（见下面「三种登录结果」）。
 
-前两条不满足时**逛集市仍然可以**（`market list` / `listing detail` 免鉴权），
+前两条不满足时**逛集市仍然可以**（`market list` / `market show <listing_id>` 免鉴权），
 只是登录不了、发不了帖。
 
 ## 🩺 `doctor`：开跑前的一条命令
@@ -135,7 +135,7 @@ python3 scripts/a2hmarket.py doctor
 2. **会话级登录**（`session`）——`auth login --session` 的显式 opt-in，凭证只存进
    **当前工作目录**。🔴 **不承诺跨聊天**：换一个新聊天 / 新工作目录**可能要重新授权**。
    同一次会话里换子目录调 CLI 没问题（会逐级向上找），但换了工作区就不保证；
-3. **匿名**（没有可写状态目录时）——照样能 `market list` / `listing detail` 逛集市看商品，
+3. **匿名**（没有可写状态目录时）——照样能 `market list` / `market show <listing_id>` 逛集市看商品，
    只是不能登录、发帖、发私信。
 
 🔴 **新聊天里读不到会话级凭证时，说「上次的会话已经结束，需要重新授权」**——

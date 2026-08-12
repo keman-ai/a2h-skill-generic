@@ -1418,9 +1418,12 @@ def cmd_listing_status(args):
 
 
 def cmd_listing_confirm(args):
-    """「还在」一个动作（0804 数据模型轮）：刷新 refreshedAt（列表按它倒序 = 刷新即曝光）
-    并把 availableUntil 顺延 14 天。主人说"还在 / 没卖掉 / 续一下"都走这里；
-    到期前 agent 唤起播报时也用它引导主人确认。"""
+    """「还在」确认 / 擦亮：**只刷新 refreshedAt**（列表按它倒序 = 刷新即曝光）。
+    主人说"还在 / 没卖掉 / 帮我擦一擦"都走这里。
+
+    🔴 **不顺延任何截止日**（0807 改版，ListingMapper.xml#confirm 的 SQL 只 SET
+       refreshed_at）：`availableUntil` 是纯信息字段，擦亮不会动它，帖子也没有到期
+       自动下架——下架只能是主人显式的状态变更。别对主人说"帮你续了 14 天"。"""
     emit_ok(call(api_post(), "POST", f"/api/v1/listings/{args.listing_id}/confirm"))
 
 
@@ -1457,9 +1460,13 @@ def cmd_message_inbox(_args):
 
     🔴 **它查不到自己发的消息**，所以它回答不了"这件商品我是不是已经问过了"——
        那件事用 {@link cmd_message_mine}（`message mine`）。见那里的注释。
+
+    这个口的每条留言按定义**都不是我发的**，所以"我在这条串里是帖主还是访客"直接由
+    发信人的结构角色取反得到——`myTradeRole` 因此算得出来，不用再查一次身份。
     """
     data = call(api_post(), "GET", "/api/v1/messages/inbox")
-    emit_ok(data, untrusted=True)
+    emit_ok(_with_trade_roles(data, lambda sender_is_poster: not sender_is_poster),
+            untrusted=True)
 
 
 def cmd_message_conversations(args):
@@ -1491,13 +1498,27 @@ def cmd_message_conversations(args):
 
 
 def cmd_message_thread(args):
+    """读整串（时间正序，仅串内双方）。
+
+    ⚠️ 这个口**算不出 `myTradeRole`**：串里两侧的消息都在，服务端也不下发"我是谁"，
+       CLI 手里没有当前用户 id，判不出我坐哪一侧——**所以就不下发，不猜**。
+       要知道自己是买是卖，用带得出 `myTradeRole` 的那几个口（`message pending` /
+       `message mine` / `message inbox` / `message listing-threads`），它们都带 threadId。
+       每条消息的 `senderTradeRole` 照常有，读串本身不会把双方说反。
+    """
     data = call(api_post(), "GET", f"/api/v1/messages/threads/{args.thread_id}")
-    emit_ok(data, untrusted=True)
+    emit_ok(_with_trade_roles(data, lambda _sender_is_poster: None), untrusted=True)
 
 
 def cmd_message_listing_threads(args):
+    """某商品下的所有串首条（仅商品主人）。
+
+    服务端只放行帖主（MessageServiceImpl#threadsByListing：调用者 != listing.sellerUserId
+    直接 NOT_FOUND），所以这个口里**我恒为帖主**——`myTradeRole` 就是帖主那一侧的
+    业务角色：卖货帖上是卖家，**求购帖上是买家**（我在收东西，来留言的才是供货方）。
+    """
     data = call(api_post(), "GET", f"/api/v1/listings/{args.listing_id}/threads")
-    emit_ok(data, untrusted=True)
+    emit_ok(_with_trade_roles(data, lambda _sender_is_poster: True), untrusted=True)
 
 
 def cmd_message_thread_status(args):
@@ -1528,6 +1549,48 @@ def _trade_role(i_am_poster: bool, trade_type: str | None) -> str:
     if i_am_poster:
         return "buyer" if wanted else "seller"
     return "seller" if wanted else "buyer"
+
+
+def _with_trade_roles(items, my_side):
+    """给服务端返回的每条留言挂上**业务角色**派生字段，原字段一个都不动。
+
+    加两个（`myTradeRole` 视口而定，可能只加一个）：
+
+    - `senderTradeRole` —— 说这句话的人是 `buyer` 出钱 / `seller` 出货
+    - `myTradeRole`     —— 我（当前用户）在这笔交易里是 `buyer` / `seller`
+
+    🔴 **为什么由 CLI 算而不是让 agent 自己推**：服务端下发的 `senderRole` 是**结构**角色
+       （SELLER=帖主发的 / BUYER=访客发的）却用了业务角色的词，求购帖上整个反过来
+       （见 {@link _trade_role}）。靠剧本教 agent「拿 senderRole 和 tradeType 自己换算」
+       是把一条业务规则外包给 LLM，学岔一次就站到错误的一侧议价——这正是 0.37.x 那串
+       bug 的共同形状。ChatGPT/MCP 面早就由服务端派生 `my_trade_role`/`sender_trade_role`
+       （UpstreamMessageSource），CLI 面这三个口此前没有，本函数把两面对齐。
+
+    `my_side`：一个 `(sender_is_poster) -> bool | None` 的判定，回答"我是不是帖主"。
+    **返回 None = 这个口判不出来，就不下发 `myTradeRole`**——不猜。给个方向错了的
+    确定性字段，比没有字段更坏。
+
+    只加字段、不裁字段：这三个口都是串内双方视角，串上那个买家自填的私人联络字段
+    本来就该给串内的人看（服务端做的是访问控制，不是字段裁剪），这里不承担裁剪职责
+    ——与 {@link cmd_message_mine} 的白名单不同，那个口是"我问过谁"的去重清单，
+    要给的人不一定在串里。非 list（服务端回 null 等）原样透出，不把 None 悄悄变成 []。
+    """
+    if not isinstance(items, list):
+        return items
+    out = []
+    for m in items:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        trade_type = m.get("tradeType")
+        sender_is_poster = m.get("senderRole") == "SELLER"
+        annotated = dict(m)
+        annotated["senderTradeRole"] = _trade_role(sender_is_poster, trade_type)
+        mine = my_side(sender_is_poster)
+        if mine is not None:
+            annotated["myTradeRole"] = _trade_role(mine, trade_type)
+        out.append(annotated)
+    return out
 
 
 def cmd_message_pending(_args):
@@ -1959,11 +2022,13 @@ def build_parser() -> argparse.ArgumentParser:
     msend.add_argument("--content", required=True)
     msend.add_argument("--purpose")
     msend.add_argument("--nickname")
-    # 🔴 买家专用：服务端 MessageServiceImpl 只在 senderRole=BUYER 时写 buyerContact，
-    #    卖家传了会被**静默忽略**（不报错、字段就是不见了）。卖家要给联系方式
-    #    就写进 --content 正文，串本来只有双方可见，效果一样。
+    # 🔴 访客侧专用：服务端 MessageServiceImpl 只在 senderRole=BUYER（= 开串那一方）
+    #    时写 buyerContact，帖主传了会被**静默忽略**（不报错、字段就是不见了）。
+    #    帖主要给联系方式就写进 --content 正文，串本来只有双方可见，效果一样。
+    #    ⚠️ 分界是**谁开的串**、不是"谁给钱"：求购帖上开串的访客业务上是卖家，
+    #    照业务角色挑写法会挑反那一侧（见 _trade_role）。
     msend.add_argument("--contact",
-                       help="买家专用，落进串上的 buyerContact；卖家传会被服务端忽略，请写进 --content")
+                       help="开串那一方（访客侧）专用，落进串上的 buyerContact；帖主传会被服务端忽略，请写进 --content")
     msend.set_defaults(fn=cmd_message_send)
     msg.add_parser("inbox",
                    help="别人发给我的留言（**不含自己发的**，查不了「我问过谁」）"
