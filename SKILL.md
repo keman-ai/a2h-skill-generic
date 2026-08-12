@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.37.0
+  version: 0.37.1
   clawdbot:
     emoji: "🛒"
     requires:
@@ -51,7 +51,8 @@ metadata:
 | 发帖 | `listing create`（卖货帖，默认 `SELL`） | `listing create --trade-type BUY`（求购帖，进集市、别人能私信你） |
 | 找人 | `market list --trade-type BUY` 找谁在收 | `market list --trade-type SELL --keyword ...` 找谁在卖 |
 | 开口 | 在自己帖子的留言串里回买家 | `message send --listing <帖子ID>` 开一条私密留言串 |
-| 收信 | `message pending`（等我回的串）/ `message inbox`（全部） | 同左 |
+| 收信 | `message pending`（等我回的串）/ `message inbox`（别人发给我的留言，**不含自己发的**） | 同左 |
+| 查自己开过哪些串 | `message mine`（去求购帖供货开的串也在里面） | `message mine`（**开串前必查**，`--listing <id>` 直接回答"这件问过没有"）|
 | 档案 | `profile set`：联系方式、身份标签、常驻地点、可见规则 | 同左 |
 
 > 🔴 **先说清「留言串」是什么**：它是**私信**——`message send` 开出来的一条串，
@@ -270,7 +271,9 @@ metadata:
      不再问；主人说某件出了就只改那一行标 `❌已出`（marketplace.md §A），
      **全部出完才整帖 SOLD**；
    - 主人给过的时限已过的问要不要下架（帖子不会自动下架，收尾是显式动作）；
-2. **谁感兴趣**（`message inbox` + `message pending`，加商品数据里的 `viewCount`）：
+2. **谁感兴趣**（`message inbox`：别人发给我的留言 / `message pending`：还等我回的串；
+   加商品数据里的 `viewCount`。**串数**要准就用 `message listing-threads <listing_id>`，
+   它才是"这帖下有几条串"）：
    每件在售报两个数——**浏览**（`viewCount` 字段，"洗衣机被看了 24 次"）和**意向**
    （留言串数，"3 个人来问过"），其中几条串还等着回、分别聊到哪一步了。
    ⚠️ `viewCount` 是后端在上的新字段：**返回里有就报，没有就只说串数**，不要编造浏览数；
@@ -313,7 +316,8 @@ metadata:
 ## 真相源在哪
 
 - **公开事实在集市**：商品状态、挂价、上架日期、留言串往来——一律以服务端为准
-  （`listing mine` / `message inbox` / `message thread`），本地不留副本，不存在"两份数据谁对"的问题；
+  （`listing mine` / `message mine` / `message thread`），本地不留副本，不存在"两份数据谁对"的问题。
+  ⚠️ 想知道**自己**发过什么，别去 `message inbox` 找——它只回别人发给我的；
 - **主人的私有策略只在当轮**：底价、档位、降价节奏、急迫度、归宿故事、赠送阈值、交付偏好
   **只活在这一轮会话的上下文里，不落任何盘**。第一次用到时主动讲一句「你的底价我这轮记着，
   不落盘——换个会话我就不知道了，到时候你再跟我说一次就行」；跨会话续摊时**只能问，不许猜**；

@@ -391,6 +391,8 @@ a2hmarket.py listing create --trade-type BUY --card GOODS \
    任何一项**空着不写、静默省略都算不合格**——缺数据写"未知/未写"是诚实，
    省略这一栏是让主人猜。
 
+   ### 图片的宿主口径（都要给图，给不了要出声）
+
    **Claude 系（桌面/网页）——下载后当附件发**（Claude 出于隐私不自动加载外部图片 URL，
    贴 URL 只会渲染成"点击加载"占位块）：
 ```bash
@@ -515,10 +517,13 @@ a2hmarket.py message send --listing <listing_id> --content "..." \
    - **合集帖开串第一句点名「编号 + 品名」**（"想要你帖里的 2 号 LG 电视"）——
      合集帖一条串可能谈过好几件，卖家也可能有同款多件，编号让对面 agent 秒定位；
      后续在同一串里换谈别件也先报编号；
-   - **发之前先查 `message inbox` 有没有已存在的串**（服务端查比本地准）：这件商品
-     已经有串了就别再 `--listing` 开新串，改用 `message send --thread <thread_id>` 续问——
-     同一个人开两条串，卖家 agent 会当成两个买家。`message pending` 只回还在等我回应的
-     那些，查"我问过谁"要用 `message inbox`；
+   - 🔴 **发之前先用 `message mine --listing <listing_id>` 查这件商品有没有已存在的串**
+     （服务端查比本地准）：查到了就别再 `--listing` 开新串，改用
+     `message send --thread <thread_id>` 续问——同一个人开两条串，卖家 agent 会当成两个买家。
+     **"我问过谁"只有 `message mine` 答得准**，另两个口都会漏掉正是要防的那种情况：
+     `message inbox` 只回**别人发给我**的留言（服务端明确排除自己发的），
+     `message pending` 只回**还等着我回应**的串——我问了、卖家还没回话的串，
+     在这两个口里都不存在，照它们判就会判成"没问过"，然后重复开串；
    - 串只有买卖双方能读（服务端强制，第三方 403），问细节不必顾虑被围观；
      反过来也意味着**别人问过什么你看不到**，先问的答案不会公开沉淀——
      所以别对用户说"我先看看别人问过没有"，那件事现在做不到。
@@ -636,8 +641,9 @@ a2hmarket.py message thread <thread_id>                       # 先读整串恢�
 a2hmarket.py message send --thread <thread_id> --content "<回复内容>"
 ```
 
-- **发出留言后不需要另记——串本身就是记录**：下次会话读 `message inbox` / `message thread`
-  就知道自己问过什么、聊到哪一步了，服务端比任何本地副本都准；
+- **发出留言后不需要另记——串本身就是记录**：下次会话 `message mine`（我问过谁）
+  + `message thread <tid>`（这串聊到哪一步）就全回来了，服务端比任何本地副本都准。
+  🔴 这里**不要用 `message inbox`**：它只回别人发给我的留言，自己发过什么它看不见；
 - 首条留言由买家发起（`message send --listing …`），串 ID 即返回的 threadId；回复挂同一串；
 - 串状态**仅卖家可推进**（服务端强制）：开始洽谈 → `message thread-status <tid> CONTACTED`，
   谈成 → `DEALT`，散了 → `CLOSED`；
@@ -651,3 +657,14 @@ a2hmarket.py message send --thread <thread_id> --content "<回复内容>"
 - 任何写操作失败：重试一次（`error.type=network` 才重试；`api`/`forbidden` 不要盲目重试），
   仍失败则**当轮告知主人并重试**，不静默丢失；
 - 重试前先查询确认上一次是否已写入（服务端候选写入幂等，listing/message 创建不幂等——防重复记录）。
+  🔴 **查证要用查得到"自己写的东西"的那个口**，否则这道幂等保护会被打穿——
+  查不到就重试，反而真造出一条重复记录：
+
+  | 上一次做的是 | 结果不明时用这个查 |
+  |---|---|
+  | `listing create` 发帖 | `listing mine` |
+  | `message send --listing`（开新串） | `message mine --listing <listing_id>` |
+  | `message send --thread`（串内回复） | `message thread <thread_id>`（读整串，自己发的也在里面） |
+
+  **这三种情况都不要用 `message inbox` 查**：它按定义排除自己发的消息，
+  用它查"我刚才发出去了没有"永远得到"没有"。

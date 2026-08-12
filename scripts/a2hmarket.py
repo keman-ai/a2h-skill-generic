@@ -1441,6 +1441,11 @@ def cmd_listing_mail_owner(args):
 
 
 def cmd_message_inbox(_args):
+    """收件箱：**别人**发给我、我还没看过的留言（服务端语义：自己参与、**非自己发**）。
+
+    🔴 **它查不到自己发的消息**，所以它回答不了"这件商品我是不是已经问过了"——
+       那件事用 {@link cmd_message_mine}（`message mine`）。见那里的注释。
+    """
     data = call(api_post(), "GET", "/api/v1/messages/inbox")
     emit_ok(data, untrusted=True)
 
@@ -1537,6 +1542,51 @@ def cmd_message_pending(_args):
             break
         page += 1
     emit_ok({"pending": pending, "count": len(pending)}, untrusted=True)
+
+
+def cmd_message_mine(args):
+    """我问过谁：我作为**访客**开过的每条串（只回首条），与对方回没回无关。
+
+    🔴 **发私信前的去重、以及"发出去了没有"的重试查证，都只能用这个口，不能用
+       `message inbox`。** inbox 的服务端语义是「自己参与、**非自己发**、晚于 since 的留言」
+       （MessageController#inbox 的 javadoc）——买家开了串、卖家还没回话时，那条串里
+       唯一一条消息就是买家自己发的，inbox 天然查不到它。于是 agent 判成"没问过"，
+       对同一件商品再开一条新串，卖家 agent 那边看见的是两个买家。
+       （0.37.0 线上真实 bug，本命令就是为堵它加的。）
+
+    /messages/mine 的服务端语义是「buyer_user_id = 我 **且** thread_id = message_id」
+    （MessageMapper.xml selectThreadHeadsByBuyer）——我作为访客开的每条串的首条，
+    与"最后一条谁发的""对方回没回""串是什么状态"全都无关，所以它对"我问过谁"是**完备**的。
+
+    ⚠️ 逐页翻完（size 上限 100 写死拉满）：去重要的是完备集合，只翻第一页就判"没问过"
+       等于没判。call() 的路径必须保持字符串字面量——打包器的出站端点扫描
+       （release/package.py _read_cli_calls）核不了变量拼出来的路径。
+
+    🔴 **PII 字段一个都不回显**：串上那个买家自填的私人联络字段（服务端 DTO 无条件带着它，
+       这个口也不例外）在去重里根本用不上，就不让它进 stdout；双方的内部用户 id 同理。
+       字段按**白名单**挑，上游哪天多回一个新字段也不会被顺手带出来。
+
+    我在这里恒为访客，业务角色因此是 {@link _trade_role}(False, tradeType)——
+    求购帖上访客是**卖家**，直接写死 "buyer" 会在求购帖上说反。
+    """
+    want = args.listing
+    threads, page = [], 1
+    while True:
+        data = call(api_post(), "GET", "/api/v1/messages/mine",
+                    params={"page": page, "size": 100}) or {}
+        for m in data.get("items", []):
+            if want and m.get("listingId") != want:
+                continue
+            trade_type = m.get("tradeType")
+            threads.append({"threadId": m.get("threadId"), "listingId": m.get("listingId"),
+                            "listingTitle": m.get("listingTitle"), "status": m.get("status"),
+                            "tradeType": trade_type,
+                            "role": _trade_role(False, trade_type),
+                            "firstContent": m.get("content"), "firstAt": m.get("createdAt")})
+        if not data.get("hasNext"):
+            break
+        page += 1
+    emit_ok({"threads": threads, "count": len(threads)}, untrusted=True)
 
 
 # ---------------------------------------------------------------- config
@@ -1872,8 +1922,13 @@ def build_parser() -> argparse.ArgumentParser:
     msend.add_argument("--contact",
                        help="买家专用，落进串上的 buyerContact；卖家传会被服务端忽略，请写进 --content")
     msend.set_defaults(fn=cmd_message_send)
-    msg.add_parser("inbox").set_defaults(fn=cmd_message_inbox)
+    msg.add_parser("inbox",
+                   help="别人发给我的留言（**不含自己发的**，查不了「我问过谁」）"
+                   ).set_defaults(fn=cmd_message_inbox)
     msg.add_parser("pending").set_defaults(fn=cmd_message_pending)
+    mmine = msg.add_parser("mine", help="我问过谁：我开过的串（首条），发私信前的去重口")
+    mmine.add_argument("--listing", help="只看这件商品下我开过的串（发私信前去重直接用它）")
+    mmine.set_defaults(fn=cmd_message_mine)
     mt = msg.add_parser("thread")
     mt.add_argument("thread_id")
     mt.set_defaults(fn=cmd_message_thread)
