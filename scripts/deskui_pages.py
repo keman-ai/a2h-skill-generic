@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""desk UI 的三屏模板（服务端渲染，移动端布局，内容容器 640px 居中）。
+"""desk UI 的两屏模板（搜索结果 / 商品详情；服务端渲染，移动端布局，640px 居中）。
+
+私信页 0812 拍板下线（网页私信链路停用，与 Web 端同步）——本模块只剩「看」的两屏。
 
 CSS 与页面 JS 住在 `assets/`（0.38.0 载荷闸开的口，仅该目录允许 .css/.js），
 本模块只负责把数据渲成 HTML 片段。
@@ -7,7 +9,7 @@ CSS 与页面 JS 住在 `assets/`（0.38.0 载荷闸开的口，仅该目录允�
 🔴 **为什么是服务端渲染**（实验第一版写成了前端模板，改掉了）：
 前端模板意味着「兜底文案」只是 JS 源码里的一个字符串常量 —— 测试断言它出现在页面里
 **永远是绿的**，哪怕渲染逻辑整个是坏的。那是假绿，比没有测试更糟。
-三屏都在 Python 里渲成 HTML 片段，页面只负责换 `innerHTML` 与转发点击：
+两屏都在 Python 里渲成 HTML 片段，页面只负责换 `innerHTML` 与转发点击：
 **一套模板、一处转义、测试断言的是真正渲出来的东西。**
 
 两条渲染纪律（不是风格，是合规）：
@@ -30,7 +32,6 @@ from __future__ import annotations
 import hashlib
 import html
 import json
-from datetime import datetime
 from pathlib import Path
 
 # 静态资源在 assets/：产物里 scripts/ 与 assets/ 并排，源码树里 kernel/scripts/ 与
@@ -153,11 +154,6 @@ FALLBACK = {
     "seller": "卖家未留背景",
     "note": "（这件我还没来得及看）",
     "description": "（这帖没写描述）",
-    # 私信页
-    "peer": "对方",
-    "no_message": "（还没有内容）",
-    "no_thread": "还没有私信",
-    "pick_thread": "选一条串看看",
 }
 
 
@@ -182,41 +178,6 @@ def avatar(user_id, nickname, size_class: str) -> str:
     initial = (str(nickname).strip()[:1] or "?") if nickname else "?"
     return (f'<span class="av av-{index} {size_class}" aria-hidden="true">'
             f'{esc(initial)}</span>')
-
-
-def relative_time(iso: str | None) -> str:
-    """会话列表的相对时间（对 pages/messages/time.ts 的近似移植）。"""
-    if not iso:
-        return ""
-    try:
-        then = datetime.fromisoformat(str(iso).replace(" ", "T"))
-    except ValueError:
-        return ""
-    now = datetime.now()
-    seconds = (now - then).total_seconds()
-    if seconds < 60:
-        return "刚刚"
-    if seconds < 3600:
-        return f"{int(seconds // 60)}分钟前"
-    if then.date() == now.date():
-        return then.strftime("%H:%M")
-    days = (now.date() - then.date()).days
-    if days == 1:
-        return "昨天"
-    if days < 7:
-        return f"{days}天前"
-    return f"{then.month}月{then.day}日"
-
-
-# 结构角色（SELLER=帖主/BUYER=访客）→ 业务角色标签。镜像 a2hmarket.py::_trade_role
-# 的真值表（那边是唯一实现；防漂移闸对照源码）。求购帖上两者相反。
-def trade_role_label(structural_role: str | None, trade_type: str | None,
-                     *, poster_role: str = "SELLER") -> str:
-    i_am_poster = structural_role == poster_role
-    wanted = trade_type == "BUY"
-    if i_am_poster:
-        return "买家" if wanted else "卖家"
-    return "卖家" if wanted else "买家"
 
 
 # ---------------------------------------------------------------- 搜索结果页（一行一件：左小 Feed 卡 + 右 AI 评语卡）
@@ -373,130 +334,11 @@ def listing_view(payload: dict) -> str:
             f'{cta}')
 
 
-# ---------------------------------------------------------------- 私信页（列表 ↔ 串详情两页切换）
+VIEWS = {"search": search_view, "listing": listing_view}
 
+HINTS = {"search": "点一张卡看详情", "listing": "想聊就点「让 AI 帮我聊聊」"}
 
-def messages_view(payload: dict) -> str:
-    """与 Web 移动端同构：列表与串详情是两个页面态，靠 activeThreadId 切。
-
-    字段名取自 ConversationDTO / MessageDTO（DtoFieldNames 闸钉着，别凭印象改）。
-    串状态 NEW/CONTACTED/DEALT/CLOSED **不显示** —— Web 端就不显示，对齐。
-    """
-    if payload.get("activeThreadId"):
-        return _thread_page(payload)
-    return _thread_list(payload)
-
-
-def _thread_list(payload: dict) -> str:
-    threads = payload.get("threads") or []
-    if not threads:
-        return f'<div class="empty">{esc(FALLBACK["no_thread"])}</div>'
-    rows = []
-    for thread in threads:
-        role = trade_role_label(
-            # peer 的结构角色 = 我的对侧：myRole 是 SELLER 则对方是访客（BUYER 结构位）
-            "BUYER" if thread.get("myRole") == "SELLER" else "SELLER",
-            thread.get("tradeType"))
-        rows.append(
-            f'<div class="mrow" role="button" tabindex="0" '
-            f'{act({"type": "open_thread", "threadId": thread["threadId"]})}>'
-            f'{avatar(thread.get("peerUserId"), thread.get("peerNickname"), "av-48")}'
-            f'<span class="mrow-body">'
-            f'<span class="mrow-line1"><span class="mrow-title">'
-            f'{esc(thread.get("listingTitle") or "这个帖子")}</span>'
-            f'<span class="mrow-time">{esc(relative_time(thread.get("lastCreatedAt")))}</span></span>'
-            f'<span class="mrow-line2"><span class="mrow-peer">'
-            f'{esc(role)} · {esc(thread.get("peerNickname") or FALLBACK["peer"])}</span>'
-            f'<span class="mrow-last">{esc(thread.get("lastContent") or FALLBACK["no_message"])}</span>'
-            f'</span></span></div>')
-    return '<p class="mtitle">私信</p>' + "".join(rows)
-
-
-def _bubble_groups(messages: list, my_role: str | None) -> str:
-    """气泡分组（对 MessageThread 的移植）：同侧 + 同天 + 间隔 ≤5 分钟合一组，
-    头像挂组首、时间挂组尾、跨天插日期条。**不重排序**，沿用服务端顺序。
-    我方判定用结构角色对比（求购帖上业务角色相反，比业务角色会画反）。"""
-    if not messages:
-        return f'<div class="empty">{esc(FALLBACK["pick_thread"])}</div>'
-
-    def parse(iso):
-        try:
-            return datetime.fromisoformat(str(iso).replace(" ", "T"))
-        except (ValueError, TypeError):
-            return None
-
-    parts, prev_time, prev_mine = [], None, None
-    for i, message in enumerate(messages):
-        mine = message.get("senderRole") == my_role
-        this_time = parse(message.get("createdAt"))
-        new_day = (prev_time is None or (this_time and prev_time
-                                         and this_time.date() != prev_time.date()))
-        if new_day and this_time:
-            parts.append(f'<p class="daynote">{this_time.month}月{this_time.day}日</p>')
-        gap = ((this_time - prev_time).total_seconds()
-               if this_time and prev_time else None)
-        new_group = new_day or mine != prev_mine or gap is None or gap > 300
-        if new_group and parts and not new_day and prev_time is not None:
-            pass  # 组间距交给 CSS margin
-        side = "me" if mine else "peer"
-        head = ""
-        if new_group and not mine:
-            head = avatar(None, "对", "av-32 bub-av")
-        rail = head or ('<span class="bub-spacer"></span>' if not mine else "")
-        parts.append(f'<div class="brow {side}">{rail}'
-                     f'<span class="bub">{esc(message.get("content"))}</span></div>')
-        next_msg = messages[i + 1] if i + 1 < len(messages) else None
-        next_time = parse(next_msg.get("createdAt")) if next_msg else None
-        group_ends = (next_msg is None
-                      or (next_msg.get("senderRole") == my_role) != mine
-                      or (next_time and this_time and
-                          (next_time.date() != this_time.date()
-                           or (next_time - this_time).total_seconds() > 300)))
-        if group_ends and this_time:
-            parts.append(f'<p class="btime {side}">{this_time.strftime("%H:%M")}</p>')
-        prev_time, prev_mine = this_time or prev_time, mine
-    return "".join(parts)
-
-
-def _thread_page(payload: dict) -> str:
-    peer_role = trade_role_label(
-        "BUYER" if payload.get("myRole") == "SELLER" else "SELLER",
-        payload.get("tradeType"))
-    peer = payload.get("peerNickname") or FALLBACK["peer"]
-    listing_link = ""
-    if payload.get("listingTitle"):
-        if payload.get("listingUrl"):
-            listing_link = (f'<a class="thead-listing" href="{esc(payload["listingUrl"])}" '
-                            f'target="_blank" rel="noreferrer">{esc(payload["listingTitle"])}</a>')
-        else:
-            listing_link = f'<span class="thead-listing">{esc(payload["listingTitle"])}</span>'
-    header = (f'<div class="thead">'
-              f'<button type="button" class="backbtn" {act({"type": "back_to_threads"})} '
-              f'aria-label="返回列表">‹</button>'
-              f'{avatar(payload.get("peerUserId"), peer, "av-36")}'
-              f'<span class="thead-body"><span class="thead-name">{esc(peer)}'
-              f'<span class="thead-role">{esc(peer_role)}</span></span>{listing_link}</span>'
-              f'<button type="button" class="aireply" data-agent="1" '
-              f'{act({"type": "ai_reply", "threadId": payload.get("activeThreadId")})}>'
-              f'让 AI 代回</button></div>')
-    bubbles = _bubble_groups(payload.get("messages") or [], payload.get("myRole"))
-    composer = (f'<form class="composer" data-send-thread="{esc(payload.get("activeThreadId"))}">'
-                f'<div class="composer-error" hidden></div>'
-                f'<div class="composer-row">'
-                f'<textarea class="composer-input" rows="1" aria-label="私信内容" '
-                f'placeholder="发消息给{esc(peer_role)}…"></textarea>'
-                f'<button type="submit" class="composer-send" disabled aria-label="发送">↑</button>'
-                f'</div></form>')
-    return header + f'<div class="bubbles">{bubbles}</div>' + composer
-
-
-VIEWS = {"search": search_view, "listing": listing_view, "messages": messages_view}
-
-HINTS = {"search": "点一张卡看详情", "listing": "想聊就点「让 AI 帮我聊聊」",
-         "messages": "可以直接打字回，也可以让 AI 代回"}
-
-# 两个窗口的页题（浏览器标签页靠它区分）
-PANE_TITLES = {"market": "A2H Market · 摊开看", "messages": "A2H Market · 私信"}
+TITLE = "A2H Market · 摊开看"
 
 
 def render_fragment(state: dict) -> str:
@@ -530,20 +372,17 @@ SHELL = """<!doctype html>
 
 
 def render_page(state: dict, token: str) -> str:
-    """整页壳（每个窗口一份，靠 pane 区分渲染哪个面板）。首屏片段直接内联
-    （省一次白屏）；动态状态经 JSON 数据岛给 JS（CSP 下不执行、不需要内联脚本）。
-    集市文本以 JSON 字符串身份进数据岛，`</` 拆开防止商品描述里的 `</script>`
-    提前关掉标签。"""
-    pane = state.get("pane") or "market"
+    """整页壳。首屏片段直接内联（省一次白屏）；动态状态经 JSON 数据岛给 JS
+    （CSP 下不执行、不需要内联脚本）。集市文本以 JSON 字符串身份进数据岛，
+    `</` 拆开防止商品描述里的 `</script>` 提前关掉标签。"""
     boot = {"revision": int(state.get("revision", 0)),
-            "pane": pane,
-            "pane_rev": int(state.get("pane_rev", 0)),
+            "view_rev": int(state.get("view_rev", 0)),
             "view": state.get("view"),
             "hint": HINTS.get(state.get("view"), ""),
             "busy": state.get("busy")}
     boot_json = json.dumps(boot, ensure_ascii=False).replace("</", "<\\/")
     return (SHELL
-            .replace("__TITLE__", PANE_TITLES.get(pane, PANE_TITLES["market"]))
+            .replace("__TITLE__", TITLE)
             .replace("__VIEW__", render_fragment(state))
             .replace("__BOOT__", boot_json)
             .replace("__TOKEN__", html.escape(token, quote=True)))

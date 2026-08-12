@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """desk UI —— 本机图形界面双向通道。
 
-起一个只听 127.0.0.1 的小服务，把搜索结果 / 商品详情 / 私信摊成网页给主人看，
+起一个只听 127.0.0.1 的小服务，把搜索结果 / 商品详情摊成网页给主人看，
 主人在页面上操作，agent 从长轮询里收到。使用剧本见 references/desk-ui.md。
+（私信页面 0812 拍板下线：网页私信链路停用，与 Web 端同步——
+跟卖家的沟通交给对话里的 agent，页面只管「看」。）
 
 🔴 本文件的四条不变量（kernel/tests/test-deskui.py 逐条钉着，改代码前先读）：
 
@@ -39,11 +41,9 @@ from urllib.parse import parse_qs, urlparse
 
 try:
     from deskui_pages import HINTS, render_fragment, render_page
-    from _site_config import FRONT_BASE
-except ModuleNotFoundError:  # 直接 import 本模块的测试没带 sys.path；两个兄弟模块一起兜
+except ModuleNotFoundError:  # 直接 import 本模块的测试没带 sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from deskui_pages import HINTS, render_fragment, render_page
-    from _site_config import FRONT_BASE
 
 PROTOCOL = "a2hmarket-deskui/v1"
 
@@ -167,25 +167,22 @@ class Session:
         self.lock = threading.Condition()
         self.session_id = secrets.token_hex(8)
         self.revision = 0
-        # 🔴 两个**独立窗口**各自一个面板（0.38.1 起，业主定的双窗口形态）：
-        #    market 面板 = 搜索/详情窗口（view ∈ search|listing），messages 面板 = 私信窗口。
-        #    全局 revision 继续做乐观并发；每个面板另记「最后一次内容变化时的 revision」
-        #    （market_rev / messages_rev）—— 页面只在**自己面板**变了才换 HTML，
-        #    否则 agent 渲染搜索结果会把私信窗口里打了一半的字冲掉。
+        # 单窗口：view ∈ search | listing（私信页面 0812 拍板下线）。
+        # 全局 revision 做乐观并发；view_rev 另记「最后一次内容变化时的 revision」——
+        # busy 置位/解除只 bump 全局 revision，页面靠 view_rev 判断要不要换 HTML
+        # （否则每次灰/亮按钮都会重渲整页，详情页的图集选中态和滚动位置会被冲掉）。
         self.view = "search"
         self.payload: dict = {"query": None, "items": []}
-        self.market_rev = 0
-        self.messages_payload: dict = {"threads": [], "activeThreadId": None, "messages": []}
-        self.messages_rev = 0
+        self.view_rev = 0
         # 🔴 最近一次搜索结果**独立存**，视图切换不触碰 —— 「返回搜索页」永远
         #    从这里渲染，直到 agent 下一次 render search 才替换。实验版把它塞在
         #    payload["_search"] 里，open_listing 一整体替换 payload 它就没了，
         #    「← 返回搜索结果」回到的是一屏空白（0812 修）。
         self.search_payload: dict = {"query": None, "items": []}
-        # 🔴 人机互斥锁：人点了 agent-bound 动作（ai_negotiate / ai_reply）后置位，
+        # 🔴 人机互斥锁：人点了 agent-bound 动作（ai_negotiate）后置位，
         #    agent 的下一次成功动作（render / ack / stop）或主人手动 unlock 清掉。
-        #    busy 期间**只锁 AI 动作**（再点 ai_negotiate / ai_reply → 423），
-        #    浏览/返回/手动发消息照常 —— 锁的是「给 AI 发第二个指令」，不是整个页面。
+        #    busy 期间**只锁 AI 动作**（再点 ai_negotiate → 423），浏览/返回照常 ——
+        #    锁的是「给 AI 发第二个指令」，不是整个页面。
         #    页面上 AI 按钮置灰 + 提示条展示 hint（「AI 接下来会做什么」要讲清）。
         self.busy: dict | None = None
         self.events: list[dict] = []
@@ -211,15 +208,12 @@ class Session:
         return self._mine
 
     def legal_actions(self) -> list[dict]:
-        """两个窗口当前允许提交的动作**全集**（动作类型在两面板间不重叠）。
+        """当前页面允许提交的动作**全集**。
 
         🔴 页面能做什么由这里说了算，不由页面上画了什么按钮说了算。
         提交上来的动作必须与本表某一项**逐字段相等**，否则 422。
-        唯一例外是 `send_message`：表里存的是**模板**（不含 content），
-        校验时把 content 剥掉再比对 —— 自由文本单独走长度闸（见 handle_human_action）。
         """
         actions: list[dict] = []
-        # market 面板（搜索/详情窗口）
         if self.view == "search":
             actions += [{"type": "open_listing", "listingId": item["listingId"]}
                         for item in self.payload.get("items", [])]
@@ -228,38 +222,21 @@ class Session:
             actions.append({"type": "back"})
             if self.payload.get("canNegotiate"):
                 actions.append({"type": "ai_negotiate", "listingId": listing.get("listingId")})
-        # messages 面板（私信窗口）：与 Web 移动端同构的两页态 ——
-        # 列表页只能开串，串详情页只能发/代回/返回列表
-        active = self.messages_payload.get("activeThreadId")
-        if active:
-            actions.append({"type": "back_to_threads"})
-            actions.append({"type": "send_message", "threadId": active})
-            actions.append({"type": "ai_reply", "threadId": active})
-        else:
-            actions += [{"type": "open_thread", "threadId": thread["threadId"]}
-                        for thread in self.messages_payload.get("threads", [])]
         return actions
 
-    def pane_state(self, pane: str) -> tuple[str, dict, int]:
-        """(view, payload, pane_rev)。pane ∈ market | messages。"""
-        if pane == "messages":
-            return "messages", self.messages_payload, self.messages_rev
-        return self.view, self.payload, self.market_rev
-
-    def human_state(self, pane: str) -> dict:
-        """给某个窗口的那份。
+    def human_state(self) -> dict:
+        """给页面的那份。
 
         🔴 **只给渲染好的 HTML，不给 payload** —— 页面拿不到原始载荷，也就无从
         「自己再渲一遍」。这是「一套模板」这条纪律的结构性保证：想在页面上多显示
         一个字段，只能去改 Python 模板，不可能在 JS 里偷偷加一份。
-        `pane_rev` 告诉页面**自己的面板**最后一次变化在哪个 revision ——
-        没变就不换 HTML（别把另一个窗口打了一半的字冲掉）。
+        `view_rev` 告诉页面内容最后一次变化在哪个 revision ——
+        没变就不换 HTML（busy 灰/亮不该冲掉图集选中态和滚动位置）。
         """
-        view, payload, pane_rev = self.pane_state(pane)
         state = {"protocol": PROTOCOL, "session_id": self.session_id,
-                 "revision": self.revision, "pane": pane, "pane_rev": pane_rev,
-                 "view": view, "hint": HINTS.get(view, ""),
-                 "html": render_fragment({"view": view, "payload": payload})}
+                 "revision": self.revision, "view_rev": self.view_rev,
+                 "view": self.view, "hint": HINTS.get(self.view, ""),
+                 "html": render_fragment({"view": self.view, "payload": self.payload})}
         if self.busy:
             # 页面据此置灰 AI 按钮 + 展示提示条：hint 告诉主人「AI 接下来会做什么」，
             # sinceSeconds 给超时兜底（页面在 90s 后追加手动解除按钮）。
@@ -267,12 +244,11 @@ class Session:
                             "sinceSeconds": int(time.monotonic() - self.busy["since"])}
         return state
 
-    def render_state(self, pane: str) -> dict:
+    def render_state(self) -> dict:
         """整页渲染要的那份（带 payload，只在进程内用，不出网）。"""
-        view, payload, pane_rev = self.pane_state(pane)
         return {"protocol": PROTOCOL, "session_id": self.session_id,
-                "revision": self.revision, "pane": pane, "pane_rev": pane_rev,
-                "view": view, "payload": payload}
+                "revision": self.revision, "view_rev": self.view_rev,
+                "view": self.view, "payload": self.payload}
 
     # -------- 写（都要持锁）
 
@@ -281,18 +257,12 @@ class Session:
         self.last_touch = time.monotonic()
         self.lock.notify_all()
 
-    def set_market(self, view: str, payload: dict) -> None:
+    def set_view(self, view: str, payload: dict) -> None:
         with self.lock:
             self.view = view
             self.payload = payload
             self._bump()
-            self.market_rev = self.revision
-
-    def set_messages(self, payload: dict) -> None:
-        with self.lock:
-            self.messages_payload = payload
-            self._bump()
-            self.messages_rev = self.revision
+            self.view_rev = self.revision
 
     def clear_busy(self) -> None:
         """解锁。幂等 —— 没锁时调用不 bump（别为无事发生刷新页面）。"""
@@ -326,11 +296,11 @@ class Session:
 
     # -------- 长轮询
 
-    def wait_state(self, pane: str, after: int | None) -> dict | None:
-        """页面用：全局 revision 变了就返回本面板的新状态，25s 没变返回 None（客户端重发）。
+    def wait_state(self, after: int | None) -> dict | None:
+        """页面用：全局 revision 变了就返回新状态，25s 没变返回 None（客户端重发）。
 
-        等在**全局** revision 上而不是面板上：busy 置位/解除也要即刻反映到两个窗口
-        （AI 按钮的灰/亮），页面靠 pane_rev 自行决定要不要换 HTML。
+        等在**全局** revision 上而不是 view_rev 上：busy 置位/解除也要即刻反映
+        （AI 按钮的灰/亮），页面靠 view_rev 自行决定要不要换 HTML。
         """
         deadline = time.monotonic() + LONG_POLL_SECONDS
         with self.lock:
@@ -341,7 +311,7 @@ class Session:
                     return None
                 self.lock.wait(remaining)
                 self.last_touch = time.monotonic()
-            return self.human_state(pane)
+            return self.human_state()
 
     def wait_event(self, after: int) -> dict | None:
         """agent 用：游标之后的第一个事件；25s 没有返回 None（客户端重发）。"""
@@ -377,43 +347,6 @@ def build_listing_view(session: Session, listing_id: str) -> dict:
             "repostUrl": repost_url,
             "canNegotiate": not mine and not repost,
             "blockedReason": "这是你自己的帖子" if mine else None}
-
-
-def build_messages_view(thread_id: str | None = None) -> dict:
-    """私信页载荷。查看 + 主人手动发送（发送走 handle_human_action 的 send_message）。
-
-    🔴 列表**必须**用 `message conversations`，不是 `message inbox`（0811 首测踩的坑）。
-       inbox 的服务端语义是「我参与的、**非我发的**、晚于 since 的留言」——
-       刚 `message send` 开完一条串去查 inbox 一定是空的，因为那条串里唯一一句话是我发的。
-       第一版拿 inbox 建列表，于是刚发完的私信在页面上显示「还没有私信」，
-       被一路误判成服务端故障。conversations 才是「我有哪些串」，后端注释里原话就是
-       「给『私信』页左栏的统一会话列表」。
-
-    🔴 字段名全部对着 ConversationDTO / MessageDTO 取，不许凭印象猜 ——
-       第一版三个名字（counterpartNickname / lastMessage / thread.messages）**全是猜的、
-       全都不存在**，而单测打了桩所以一路全绿。`test_deskui.py` 现在有一条闸直接读
-       那两个 Java DTO 核对字段名，别绕过它。
-    """
-    page = a2hmarket("message", "conversations", "--size", "50") or {}
-    threads = page.get("items") if isinstance(page, dict) else page
-    threads = [t for t in (threads or []) if t.get("threadId")]
-    # 🔴 不自动选中第一条（0.38.0 起）：与 Web 移动端同构 —— 无 thread_id = 会话列表页，
-    #    有 = 串详情页，两页切换。实验版自动选第一条是桌面式单视图的遗留。
-    active = next((t for t in threads if t.get("threadId") == thread_id), None)
-    # message thread 返回的是 **List[MessageDTO] 本身**，不是 {"messages": [...]}。
-    messages = a2hmarket("message", "thread", thread_id) if thread_id else []
-    if not isinstance(messages, list):
-        messages = []
-    listing_id = (active or {}).get("listingId")
-    return {"threads": threads, "activeThreadId": thread_id, "messages": messages,
-            # 「哪条是我发的」：senderRole 与 myRole 都是**结构**角色，结构对结构比就对了
-            # （同 cmd_message_pending 的做法），不要在这里做业务角色换算。
-            "myRole": (active or {}).get("myRole"),
-            "tradeType": (active or {}).get("tradeType"),
-            "peerUserId": (active or {}).get("peerUserId"),
-            "peerNickname": (active or {}).get("peerNickname"),
-            "listingTitle": (active or {}).get("listingTitle"),
-            "listingUrl": f"{FRONT_BASE}/listings/{listing_id}" if listing_id else None}
 
 
 # ---------------------------------------------------------------- HTTP
@@ -481,10 +414,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._guard(url)
             query = parse_qs(url.query)
-            if self.command in ("GET", "HEAD") and url.path in ("/", "/search", "/listing", "/messages"):
-                # 双窗口：/messages 是私信窗口，其余路径都是搜索/详情窗口
-                pane = "messages" if url.path == "/messages" else "market"
-                page = render_page(session.render_state(pane), self.server.token)
+            if self.command in ("GET", "HEAD") and url.path in ("/", "/search", "/listing"):
+                page = render_page(session.render_state(), self.server.token)
                 self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
             elif self.command == "GET" and url.path in ("/assets/deskui.css", "/assets/deskui.js"):
                 # 静态资源与页面同门禁（都带 ?k=）。read_bytes 只读，零落盘不变量不受影响。
@@ -494,10 +425,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, asset.read_bytes(), content_type)
             elif self.command == "GET" and url.path == "/api/state":
                 after = query.get("after")
-                pane = (query.get("pane") or ["market"])[0]
-                if pane not in ("market", "messages"):
-                    raise DeskError(400, "pane 只能是 market / messages")
-                state = session.wait_state(pane, int(after[0]) if after else None)
+                state = session.wait_state(int(after[0]) if after else None)
                 self._json(200, state) if state else self._send(204, b"", "application/json")
             elif self.command == "GET" and url.path == "/api/agent-events":
                 event = session.wait_event(int((query.get("after") or ["0"])[0]))
@@ -523,31 +451,24 @@ class Handler(BaseHTTPRequestHandler):
 # agent-bound 动作的提示条文案：人点完之后「AI 接下来会做什么」要在页面上讲清，
 # 不让主人对着转圈猜（业主 spec：人操作之后 AI 会去做什么，在 Web 端就提示）。
 BUSY_HINTS = {
-    "ai_negotiate": "AI 已收到：正在起草给卖家的私信。草稿会在左侧对话里跟你确认后才发出"
+    "ai_negotiate": "AI 已收到：正在替你去联系卖家。它会在左侧对话里跟你确认每一步"
                     "——去看一眼对话框",
-    "ai_reply": "AI 正在读这条串并处理回复。需要你拿主意的（价格低于你的线、或它不知道的"
-                "信息）它会在对话里先问你",
 }
 
-# 只有这两个动作会惊动 agent —— busy 期间也**只锁这两个**（0.38.1 收窄）：
+# 只有这个动作会惊动 agent —— busy 期间也**只锁它**（0.38.1 收窄）：
 # 锁的语义是「AI 一次只接一个指令」，不是「AI 干活时人不许逛」。
-AGENT_BOUND = {"ai_negotiate", "ai_reply"}
-
-# 主人亲手打的私信正文的长度闸。服务端对 content 没有长度校验，这里兜一道，
-# 防止误粘一整篇文档进输入框。
-MESSAGE_CONTENT_MAX = 2000
+AGENT_BOUND = {"ai_negotiate"}
 
 
 def handle_human_action(session: Session, body: dict) -> dict:
     """页面提交的动作。
 
     🔴 **三层裁决**，顺序不能换：
-    ① busy 锁 —— AI 一次只接一个指令：agent 正在处理事件时，再点 ai_negotiate /
-       ai_reply → 423；浏览/返回/手动发消息**照常放行**（0.38.1 起只锁 AI 动作，
-       不锁整个页面）。`unlock` 是超时兜底（agent 可能死了）。
-    ② `legal_actions` 比对（不在表里 → 422）—— `send_message` 剥掉 content 后按模板比对，
-       content 是全协议唯一的自由文本字段，只流向 CLI 参数，永不进 agent 事件；
-    ③ 事件分级 —— 导航类 sidecar 自理，`ai_negotiate` / `ai_reply` 惊动 agent 并上锁。
+    ① busy 锁 —— AI 一次只接一个指令：agent 正在处理事件时，再点 ai_negotiate → 423；
+       浏览/返回**照常放行**（0.38.1 起只锁 AI 动作，不锁整个页面）。
+       `unlock` 是超时兜底（agent 可能死了）。
+    ② `legal_actions` 比对（不在表里 → 422）；
+    ③ 事件分级 —— 导航类 sidecar 自理，`ai_negotiate` 惊动 agent 并上锁。
     """
     action = body.get("action")
     if not isinstance(action, dict):
@@ -561,45 +482,22 @@ def handle_human_action(session: Session, body: dict) -> dict:
             return {"ok": True, "handled_by": "sidecar", "unlocked": True,
                     "revision": session.revision}
         if kind in AGENT_BOUND:
-            raise DeskError(423, "AI 正在进行你上一个指令 —— 等它完成再点。"
-                                 "浏览和手动发消息不受影响")
+            raise DeskError(423, "AI 正在进行你上一个指令 —— 等它完成再点。浏览不受影响")
 
     expected = body.get("expected_revision")
     if expected is not None and int(expected) != session.revision:
         raise DeskError(409, f"状态已经变了（现在 revision={session.revision}）")
 
-    # ② 动作集比对。send_message 特殊：模板不含 content，剥掉再比。
-    comparable = {key: value for key, value in action.items() if key != "content"} \
-        if kind == "send_message" else action
-    if comparable not in session.legal_actions():
+    # ② 动作集比对。
+    if action not in session.legal_actions():
         raise DeskError(422, "这个动作不在当前页面的允许动作集里")
 
-    # ③ 分级执行。market 面板与 messages 面板各写各的，互不触碰。
+    # ③ 分级执行。
     if kind == "open_listing":
-        session.set_market("listing", build_listing_view(session, action["listingId"]))
+        session.set_view("listing", build_listing_view(session, action["listingId"]))
         return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
     if kind == "back":
-        session.set_market("search", session.search_payload)
-        return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
-    if kind == "open_thread":
-        # 读串是导航，不惊动 agent（0.38.0 起；实验版这里还发事件，改掉的理由：
-        # agent 介入只留 ai_negotiate / ai_reply 两个显式入口，互斥锁状态机才收得住）。
-        session.set_messages(build_messages_view(action["threadId"]))
-        return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
-    if kind == "back_to_threads":
-        session.set_messages(build_messages_view())
-        return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
-    if kind == "send_message":
-        content = action.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise DeskError(400, "消息内容是空的")
-        if len(content) > MESSAGE_CONTENT_MAX:
-            raise DeskError(400, f"消息太长（上限 {MESSAGE_CONTENT_MAX} 字）")
-        # 主人亲手发的：sidecar 直接经 CLI 发出，不入 agent 事件流 ——
-        # agent 不自动跟进主人的手动消息（要它帮忙，主人点「让 AI 代回」或在对话里说）。
-        a2hmarket("message", "send", "--thread", action["threadId"],
-                  "--content", content.strip())
-        session.set_messages(build_messages_view(action["threadId"]))
+        session.set_view("search", session.search_payload)
         return {"ok": True, "handled_by": "sidecar", "revision": session.revision}
     if kind == "ai_negotiate":
         listing = (session.payload.get("listing") or {})
@@ -609,12 +507,6 @@ def handle_human_action(session: Session, body: dict) -> dict:
             "price": listing.get("price"),
             "currency": listing.get("currency"),
         }, BUSY_HINTS[kind])
-        return {"ok": True, "handled_by": "agent", "event_id": event["event_id"]}
-    if kind == "ai_reply":
-        # 🔴 事件只带 threadId，不带任何串内容 —— agent 自己经 CLI 读串，
-        #    untrusted 标记走既有通道；页面永远回传不了自由文本给 agent。
-        event = session.emit("ai_reply", "messages",
-                             {"threadId": action["threadId"]}, BUSY_HINTS[kind])
         return {"ok": True, "handled_by": "agent", "event_id": event["event_id"]}
     raise DeskError(422, f"未知动作 {kind}")
 
@@ -649,13 +541,9 @@ def handle_agent_action(session: Session, body: dict, server) -> dict:
         payload = normalize_search(action.get("payload") or {})
         # 🔴 搜索结果只此一份、独立于当前视图存活：新搜索替换它，返回时复用它
         session.search_payload = payload
-        session.set_market("search", payload)
+        session.set_view("search", payload)
     elif view == "listing":
-        session.set_market("listing", build_listing_view(session, action["listingId"]))
-    elif view == "messages":
-        session.set_messages(build_messages_view(action.get("threadId")))
-        # 私信是**独立的第二个窗口** —— 把它的地址还给 agent（第一次渲染时开给主人）
-        result["url"] = server.messages_url
+        session.set_view("listing", build_listing_view(session, action["listingId"]))
     else:
         raise DeskError(422, f"未知视图 {view}")
     session.clear_busy()
@@ -722,13 +610,10 @@ def serve(args) -> int:
     server.allowed_hosts = {f"{args.host}:{port}", f"localhost:{port}"}
     server.allowed_origins = {f"http://{args.host}:{port}", f"http://localhost:{port}"}
     url = f"http://{args.host}:{port}/?k={server.token}"
-    # 双窗口：私信是独立的第二个窗口，同进程同令牌，只是入口路径不同
-    server.messages_url = f"http://{args.host}:{port}/messages?k={server.token}"
 
     # 🔴 一行 ready JSON 打到 stdout，agent 从这里读 url。**不写任何文件** ——
     #    后续的 render / wait / act 都靠 agent 把这个 url 带在 --url 上（同 qipai）。
     print(json.dumps({"ok": True, "protocol": PROTOCOL, "url": url,
-                      "messagesUrl": server.messages_url,
                       "session_id": session.session_id, "pid": os.getpid()},
                      ensure_ascii=False), flush=True)
 
@@ -797,8 +682,6 @@ def cmd_render(args) -> int:
         action["payload"] = json.loads(raw)
     elif args.view == "listing":
         action["listingId"] = args.listing_id
-    elif args.view == "messages" and args.thread_id:
-        action["threadId"] = args.thread_id
     return _submit(args, action)
 
 
@@ -868,9 +751,8 @@ def build_parser() -> argparse.ArgumentParser:
             child.add_argument("--revision", type=int, help="乐观并发；不给就不校验")
             child.add_argument("--event", type=int, help="正在处理的 event_id")
         if name == "render":
-            child.add_argument("--view", required=True, choices=("search", "listing", "messages"))
+            child.add_argument("--view", required=True, choices=("search", "listing"))
             child.add_argument("--listing-id")
-            child.add_argument("--thread-id")
         if name == "act":
             child.add_argument("--action", required=True, help="动作 JSON")
     return parser

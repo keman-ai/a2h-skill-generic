@@ -6,7 +6,6 @@
 :root{
   --yx-bg:#f0f0f3; --yx-card:#fff; --yx-ink:#000; --yx-ink-hover:#1a1a1a;
   --text-75:rgba(0,0,0,.75); --yx-muted:rgba(0,0,0,.5); --yx-faint:rgba(0,0,0,.3);
-  --text-40:rgba(0,0,0,.4);
   --yx-line:rgba(0,0,0,.08); --yx-line-weak:rgba(0,0,0,.06);
   --black-05:rgba(0,0,0,.05); --black-04:rgba(0,0,0,.04);
   --yx-tag:#8266ff; --yx-tag-strong:#6a4fe0;
@@ -15,7 +14,7 @@
   --glass-card:rgba(255,255,255,.6); --glass-nav:rgba(255,255,255,.75); --glass-line:#fff;
   --shadow-card:0 4px 24px rgba(0,0,0,.04); --shadow-btn:0 4px 12px rgba(0,0,0,.1);
   --shadow-cta:0 8px 24px rgba(0,0,0,.18);
-  --r-pill:999px; --r-card:16px; --r-inner:14px; --r-bubble:16px; --r-media:20px;
+  --r-pill:999px; --r-card:16px; --r-inner:14px; --r-media:20px;
   /* 预设头像渐变对（tokens 的 avatar-a1..f2） */
   --av0a:#cfa9ff; --av0b:#7DCFFF; --av1a:#ffb3c1; --av1b:#c77dff;
   --av2a:#8fb8ff; --av2b:#5d7dff; --av3a:#ffd29d; --av3b:#ff8fb1;
@@ -93,10 +92,7 @@ button{font:inherit;cursor:pointer}
 .av-4{background:linear-gradient(135deg,var(--av4a),var(--av4b))}
 .av-5{background:linear-gradient(135deg,var(--av5a),var(--av5b))}
 .av-18{width:18px;height:18px;font-size:10px}
-.av-32{width:32px;height:32px;font-size:14px}
-.av-36{width:36px;height:36px;font-size:15px}
 .av-44{width:44px;height:44px;font-size:18px}
-.av-48{width:48px;height:48px;font-size:19px}
 
 /* ── 商品详情页 ── */
 .detail-bar{position:relative;display:flex;align-items:center;justify-content:center;
@@ -158,66 +154,6 @@ button{font:inherit;cursor:pointer}
 .cta:disabled{opacity:.5;cursor:not-allowed}
 .cta-link{text-decoration:none;box-sizing:border-box}
 .cta-blocked{margin:8px 0 0;text-align:center;font-size:12px;color:var(--yx-muted)}
-
-/* ── 私信：列表 ── */
-.mtitle{margin:2px 0 10px;font-size:20px;font-weight:800}
-.mrow{display:flex;align-items:center;gap:12px;padding:12px;margin-bottom:8px;
-  border-radius:var(--r-inner);border:1px solid var(--glass-line);
-  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  cursor:pointer}
-.mrow-body{display:grid;gap:4px;min-width:0;flex:1}
-.mrow-line1{display:flex;align-items:baseline;gap:8px}
-.mrow-title{font-size:14px;font-weight:600;line-height:1.375;min-width:0;flex:1;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mrow-time{flex:none;font-size:11px;color:var(--yx-faint)}
-.mrow-line2{display:flex;align-items:baseline;gap:8px;min-width:0}
-.mrow-peer{flex:none;font-size:12px;color:var(--yx-muted)}
-.mrow-last{min-width:0;flex:1;font-size:12px;color:var(--yx-faint);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-/* ── 私信：串详情 ── */
-.thead{display:flex;align-items:center;gap:10px;padding:4px 0 12px}
-.thead .backbtn{position:static}
-.thead-body{display:grid;gap:1px;min-width:0;flex:1}
-.thead-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-.thead-role{margin-left:6px;font-size:11px;font-weight:400;color:var(--yx-muted)}
-.thead-listing{display:block;font-size:12px;color:var(--yx-muted);
-  text-decoration:underline;text-underline-offset:2px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.aireply{flex:none;border:1px solid var(--yx-line);border-radius:var(--r-pill);
-  background:var(--yx-card);padding:6px 12px;font-size:12px;font-weight:500;
-  color:var(--yx-ink)}
-.bubbles{display:flex;flex-direction:column;gap:10px;padding-bottom:96px}
-.daynote{margin:6px 0 0;text-align:center;font-size:11px;color:var(--yx-faint)}
-.brow{display:flex;align-items:flex-start;gap:8px}
-.brow.me{justify-content:flex-end}
-.bub-av{margin-top:2px}
-.bub-spacer{width:32px;flex:none}
-.bub{max-width:76%;border-radius:var(--r-bubble);padding:9px 14px;font-size:14px;
-  line-height:1.55;color:#0d0d0d;overflow-wrap:anywhere;white-space:pre-wrap}
-.brow.peer .bub{background:var(--black-05)}
-.brow.me .bub{background:var(--yx-tag-bg)}
-.btime{margin:-4px 0 0;font-size:11px;color:var(--yx-faint)}
-.btime.peer{padding-left:40px}
-.btime.me{text-align:right}
-
-/* Composer（.ds-composer 快照：白胶囊 50px + 40px 黑圆发送键） */
-.composer{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:8px 16px 14px;
-  background:linear-gradient(180deg,rgba(240,240,243,0),var(--yx-bg) 30%)}
-.composer>*{max-width:608px;margin-left:auto;margin-right:auto}
-.composer-error{margin-bottom:8px;border-radius:var(--r-inner);background:#fdecec;
-  color:#b3261e;padding:10px 12px;font-size:12px}
-.composer-row{display:flex;align-items:flex-end;gap:6px;min-height:50px;
-  border-radius:var(--r-pill);border:1px solid var(--yx-line);background:var(--yx-card);
-  padding:6px 6px 6px 18px;box-shadow:0 8px 32px rgba(0,0,0,.08)}
-.composer-input{flex:1;border:0;outline:0;resize:none;background:transparent;
-  font:16px/1.5 inherit;padding:8px 4px;max-height:120px;color:var(--yx-ink)}
-.composer-input::placeholder{color:var(--text-40)}
-.composer-send{flex:none;width:40px;height:40px;border:0;border-radius:50%;
-  background:var(--yx-ink);color:var(--text-inverse);font-size:17px;line-height:1;
-  display:flex;align-items:center;justify-content:center}
-.composer-send:disabled{background:rgba(0,0,0,.1);cursor:not-allowed}
 
 /* ── AI 忙碌提示条（0.38.1：不再整页锁定，只锁 AI 动作按钮） ──
    顶部浮条讲清「AI 接下来会做什么」；页面其余部分照常可点。 */

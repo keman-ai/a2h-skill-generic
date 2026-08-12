@@ -1,18 +1,15 @@
-/* desk UI 页面脚本。刻意保持薄：长轮询换片段、转发点击、忙碌提示条、composer 提交、
+/* desk UI 页面脚本。刻意保持薄：长轮询换片段、转发点击、忙碌提示条、
    图片比例钳制 —— 没有第二套模板（HTML 全部由服务端渲染，见 deskui_pages.py 头注）。
    通过 CSP 外置加载；启动状态从 #boot JSON 数据岛读（CSP 下不执行、无内联脚本）。
 
-   双窗口（0.38.1）：本页只认自己的面板（boot.pane = market | messages）。
-   长轮询等在**全局** revision 上（busy 的灰/亮要即刻反映），但只有**自己面板**的
-   pane_rev 变了才换 HTML —— 否则 agent 渲染搜索结果会把私信窗口打了一半的字冲掉。 */
+   长轮询等在**全局** revision 上（busy 的灰/亮要即刻反映），但只有 view_rev
+   变了才换 HTML —— 否则每次灰/亮都会冲掉图集选中态和滚动位置。 */
 (function () {
   'use strict';
 
   var boot = JSON.parse(document.getElementById('boot').textContent || '{}');
-  var PANE = boot.pane || 'market';
   var revision = boot.revision || 0;
-  var paneRev = boot.pane_rev || 0;
-  var sending = false;
+  var viewRev = boot.view_rev || 0;
   var busyState = null;
   var busyShownAt = null;
   var toastTimer = null;
@@ -80,23 +77,17 @@
   function applyState(state) {
     revision = state.revision;
     renderBusy(state.busy || null);
-    /* 自己面板没变就不动 DOM —— 别把打了一半的字冲掉 */
-    if (state.pane_rev === paneRev) { return; }
-    paneRev = state.pane_rev;
+    /* 内容没变就不动 DOM —— 别冲掉图集选中态和滚动位置 */
+    if (state.view_rev === viewRev) { return; }
+    viewRev = state.view_rev;
     var view = document.getElementById('view');
     view.innerHTML = state.html;
     watchRatios(view);
-    var input = view.querySelector('.composer-input');
-    if (input) { wireComposer(view, input); }
     window.scrollTo(0, 0);
-    var bubbles = view.querySelector('.bubbles');
-    if (bubbles) { window.scrollTo(0, document.body.scrollHeight); }
   }
 
   function showError(message) {
-    var box = document.querySelector('.composer-error');
-    if (box) { box.textContent = message; box.hidden = false; }
-    else { showToast(message); }
+    showToast(message);
   }
 
   function submit(action, onDone) {
@@ -143,33 +134,6 @@
     }
   });
 
-  /* ── Composer：空内容禁发；发送中双重禁；错误显示在输入框上方（对齐 Web 行为） ── */
-  function wireComposer(root, input) {
-    var form = root.querySelector('.composer');
-    var send = root.querySelector('.composer-send');
-    input.addEventListener('input', function () {
-      send.disabled = sending || input.value.trim().length === 0;
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-    });
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      var content = input.value.trim();
-      if (!content || sending) { return; }
-      sending = true;
-      send.disabled = true;
-      submit({ type: 'send_message', threadId: form.getAttribute('data-send-thread'),
-               content: content },
-        function (ok) {
-          sending = false;
-          if (ok) { input.value = ''; }
-          else { send.disabled = input.value.trim().length === 0; }
-        });
-    });
-  }
-  var firstInput = document.querySelector('.composer-input');
-  if (firstInput) { wireComposer(document, firstInput); }
-
   document.addEventListener('click', function (event) {
     if (event.target.id !== 'busy-unlock') { return; }
     submit({ type: 'unlock' });
@@ -180,7 +144,7 @@
   renderBusy(boot.busy || null);
   var backoff = 1000;
   (function poll() {
-    api('/api/state?pane=' + PANE + '&after=' + revision).then(function (response) {
+    api('/api/state?after=' + revision).then(function (response) {
       if (response.status === 204) { backoff = 1000; setLive(true); poll(); return; }
       if (!response.ok) { throw new Error(String(response.status)); }
       response.json().then(function (state) {
