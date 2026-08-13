@@ -61,6 +61,11 @@ CLI_TIMEOUT = 60
 # 不要用户一点击又同步重取；超过这段时间仍先画快照，再在后台校准。
 DETAIL_SNAPSHOT_TTL_SECONDS = 30
 
+# AI 搜索摘要的硬上限（字符）。剧本口径是 150 字以内（软约束，见 desk-ui.md），
+# 这里是结构性兜底：不守规矩的超长摘要会被截断加省略号——第一件商品不能被
+# 摘要挤出首屏，页面质量不靠 agent 自觉（与「human 视图是载荷真子集」同一思路）。
+SUMMARY_MAX = 220
+
 # ListingDTO 的公开字段白名单。搜索载荷即便混进别的 agent 上下文字段，也只能有这些
 # 进入详情快照；这与 normalize_search 只挑卡片字段是同一条结构性隐私边界。
 PUBLIC_LISTING_FIELDS = (
@@ -733,10 +738,13 @@ def normalize_search_bundle(payload: dict) -> tuple[dict, dict[str, dict]]:
         items.append(card)
         snapshots[card["listingId"]] = _normalize_detail_snapshot(raw, detail, card)
     summary = payload.get("summary")
+    summary = summary.strip() if isinstance(summary, str) else ""
+    if len(summary) > SUMMARY_MAX:
+        summary = summary[:SUMMARY_MAX - 1] + "…"
     return {"query": payload.get("query"),
             # AI 搜索摘要（2026-08 设计定稿 3a）：agent 自由写的一段话，呈现纪律
-            # 四件套摊在这里；缺省时页面整卡不渲染
-            "summary": summary if isinstance(summary, str) and summary.strip() else None,
+            # 四件套摊在这里；缺省时页面整卡不渲染，超长被 SUMMARY_MAX 截断
+            "summary": summary or None,
             "items": items}, snapshots
 
 
