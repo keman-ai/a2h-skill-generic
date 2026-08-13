@@ -36,8 +36,15 @@ python3 scripts/deskui.py serve
 对象；页面点击后会直接用这份快照开详情，不再同步等待一次 `market show`：
 
 ```bash
-echo '{"query":"蓝牙耳机","items":[{"detail":<market list 返回的单件原始对象>,"distanceNote":"离你约 2 公里","aiNote":"价格合适，但先确认电池健康度","url":"<分享页链接>"},…]}' | python3 scripts/deskui.py render --view search --url <url>
+echo '{"query":"蓝牙耳机","summary":"用「耳机/降噪/headphones」等 6 路搜完 84 条，逐条看完后相关 9 条，剔掉 3 条误命中，下面摊开最值得看的 5 件。","items":[{"detail":<market list 返回的单件原始对象>,"distanceNote":"离你约 2 公里","aiNote":"价格合适，但先确认电池健康度","url":"<分享页链接>"},…]}' | python3 scripts/deskui.py render --view search --url <url>
 ```
+
+顶层字段：
+
+| 载荷字段 | 说明 | 取不到时 |
+|---|---|---|
+| `query` | 页标题（页面渲成「query」） | 缺省不出标题 |
+| `summary` | **AI 搜索摘要，一段话**——呈现纪律四件套（搜了几路/多少条里挑的/覆盖/零结果）就摊在这里，页面顶部单独一张卡 | 缺省整卡不渲染，但四件套就得回对话里说——别两头都不说 |
 
 每件的字段（`detail` 提供七项硬校验 + 帖型字段，其余是 agent 的增补）：
 
@@ -58,8 +65,8 @@ echo '{"query":"蓝牙耳机","items":[{"detail":<market list 返回的单件原
 🔴 **别把主人的私有定价策略写进 `aiNote`**（定义见 [pricing.md](pricing.md)）——页面随时
 可能被投屏、被截图；载荷里放了也进不了页面（模板只认上表字段），但别去试。
 
-🔴 **摊了页面不等于闭嘴**：呈现纪律四件套（搜了几路/多少条里挑的/覆盖/零结果）、
-误命中说明、劝退理由、要追问主人的事，**照旧在对话里给**——那些卡片上放不下。
+🔴 **摊了页面不等于闭嘴**：四件套写进 `summary` 之后，误命中说明、劝退理由、
+要追问主人的事**照旧在对话里给**——那些卡片和摘要上放不下。
 不该说的只有逐件复述卡上已有的东西。
 
 ## 摊完之后：页面自理，你回对话

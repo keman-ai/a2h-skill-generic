@@ -32,12 +32,14 @@
     toastTimer = setTimeout(function () { toast.hidden = true; }, 2500);
   }
 
-  /* ── 图片比例钳制（对 lib/imageRatio.ts 的移植）：3:4 ~ 4:3 之间用原比例，
-     超界钳到边界裁切；未知时 CSS 里的 4:3 兜底 ── */
+  /* ── 图片比例钳制（对 lib/imageRatio.ts 的移植）：搜索缩略图 3:4 ~ 4:3；
+     详情主图收紧到 1:1 ~ 4:3（data-ratio-min="1"，2026-08 设计定稿——竖图纵向
+     占用封顶 = 容器宽）。超界钳到边界，未知时 CSS 里的 4:3 兜底 ── */
   function clampRatio(img) {
     if (!img.naturalWidth || !img.naturalHeight) { return; }
+    var min = parseFloat(img.getAttribute('data-ratio-min')) || 0.75;
     var ratio = img.naturalWidth / img.naturalHeight;
-    var clamped = Math.min(Math.max(ratio, 0.75), 4 / 3);
+    var clamped = Math.min(Math.max(ratio, min), 4 / 3);
     var box = img.parentElement;
     if (box) { box.style.aspectRatio = String(clamped); }
   }
@@ -115,6 +117,28 @@
     if (!target) { return; }
     event.preventDefault();
     submit(JSON.parse(target.getAttribute('data-act')), target);
+  });
+
+  /* ── 大图放大（2026-08 设计定稿）：点主图开原比例全图浮层，点击/Esc 关闭。
+     纯页面本地行为，不产生回传动作；图 URL 已过模板的 https 白名单 ── */
+  function closeLightbox() {
+    var box = document.querySelector('.lightbox');
+    if (box) { box.remove(); }
+  }
+  document.addEventListener('click', function (event) {
+    if (event.target.closest('.lightbox')) { closeLightbox(); return; }
+    var main = event.target.closest('[data-lightbox]');
+    if (!main || !main.src) { return; }
+    var box = document.createElement('div');
+    box.className = 'lightbox';
+    var img = document.createElement('img');
+    img.src = main.src;
+    img.alt = '';
+    box.appendChild(img);
+    document.body.appendChild(box);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeLightbox(); }
   });
 
   /* 复制联系方式：页面唯一的本地行为（不产生回传动作）。按钮短暂变「已复制」。 */

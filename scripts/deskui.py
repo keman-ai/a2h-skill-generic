@@ -682,6 +682,8 @@ def _normalize_card(raw: dict, detail: dict) -> dict | None:
         "itemCondition": _value(raw, detail, "itemCondition"),
         "location": _value(raw, detail, "location"),
         "distanceNote": raw.get("distanceNote"),
+        # 无图卡用描述首段补位（2026-08 设计定稿 3a）；有图卡模板不读这个键
+        "description": _value(raw, detail, "description"),
         "seller": {
             "verifiedSchool": (seller.get("verifiedSchool")
                                or _value(raw, detail, "sellerVerifiedSchool")),
@@ -730,7 +732,12 @@ def normalize_search_bundle(payload: dict) -> tuple[dict, dict[str, dict]]:
             continue
         items.append(card)
         snapshots[card["listingId"]] = _normalize_detail_snapshot(raw, detail, card)
-    return {"query": payload.get("query"), "items": items}, snapshots
+    summary = payload.get("summary")
+    return {"query": payload.get("query"),
+            # AI 搜索摘要（2026-08 设计定稿 3a）：agent 自由写的一段话，呈现纪律
+            # 四件套摊在这里；缺省时页面整卡不渲染
+            "summary": summary if isinstance(summary, str) and summary.strip() else None,
+            "items": items}, snapshots
 
 
 def normalize_search(payload: dict) -> dict:

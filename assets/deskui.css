@@ -1,7 +1,8 @@
-/* desk UI 样式 —— 对齐 Web 端移动档（frontend/src/ui/tokens/*，2026-08-12 快照）。
-   只做移动端布局：内容容器 640px（--narrow-max）居中，横向 padding 16px 只此一层。
-   浅色单主题（Web 端本来就没有暗色模式）。玻璃卡一档（.6/15px），
-   必配 1px 纯白描边 —— 别发明第二档。价格色是全站唯一暖色，只给价格。 */
+/* desk UI 样式 —— 对齐 Web 端移动档（frontend/src/ui/tokens/*，2026-08 设计定稿快照）。
+   内容列锁 430 居中（主流手机宽），更宽的窗口左右留白为背景色；横向 padding 16 只此一层。
+   页顶 220px 氛围带对齐 Web 内页档。浅色单主题（Web 端本来就没有暗色模式）。
+   玻璃两档（卡片 .6/15px、圆钮 .75/25px）必配 1px 纯白描边——别发明第三档。
+   价格色是全站唯一暖色，只给价格。浅底紫字一律 --yx-tag-strong。最小字号 11px。 */
 
 :root{
   --yx-bg:#f0f0f3; --yx-card:#fff; --yx-ink:#000; --yx-ink-hover:#1a1a1a;
@@ -10,8 +11,9 @@
   --black-05:rgba(0,0,0,.05); --black-04:rgba(0,0,0,.04);
   --yx-tag:#8266ff; --yx-tag-strong:#6a4fe0;
   --yx-tag-bg:rgba(130,102,255,.08); --yx-tag-bg-strong:rgba(130,102,255,.10);
+  --yx-ai-bg:rgba(130,102,255,.06);
   --yx-price:#ff4920; --text-inverse:#fff;
-  --glass-card:rgba(255,255,255,.6); --glass-line:#fff;
+  --glass-card:rgba(255,255,255,.6); --glass-nav:rgba(255,255,255,.75); --glass-line:#fff;
   --shadow-card:0 4px 24px rgba(0,0,0,.04); --shadow-btn:0 4px 12px rgba(0,0,0,.1);
   --shadow-cta:0 8px 24px rgba(0,0,0,.18);
   --r-pill:999px; --r-card:16px; --r-inner:14px; --r-media:20px;
@@ -24,63 +26,69 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--yx-bg);color:var(--yx-ink);
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif}
+/* 页顶氛围带（2026-08 设计定稿，对齐 Web 内页档）：通栏、不随内容列收窄、不挡点击 */
+body::before{content:"";position:absolute;top:0;left:0;right:0;height:220px;
+  pointer-events:none;
+  background:linear-gradient(180deg,rgba(240,240,243,0) 0%,#f0f0f3 100%),
+    linear-gradient(90deg,rgba(63,191,255,.06) 0%,rgba(55,0,255,.26) 45%,
+      rgba(255,11,137,.12) 78%,rgba(255,11,137,0) 100%)}
 button{font:inherit;cursor:pointer}
 .is-pending{opacity:.62;pointer-events:none}
-.shell{max-width:640px;margin:0 auto;padding:12px 16px 120px}
+.shell{position:relative;max-width:430px;margin:0 auto;padding:12px 16px 120px}
 .empty{color:var(--yx-faint);text-align:center;padding:48px 0;font-size:14px}
 
-/* 连接状态点（原在导航里；导航拆掉后固定在右上角） */
+/* 连接状态点（固定右上角） */
 .dot{position:fixed;top:10px;right:10px;z-index:30;width:7px;height:7px;
   border-radius:50%;background:#28c840}
 .dot.off{background:var(--yx-faint)}
 
-/* ── 搜索结果页：一行一件 —— 左小 Feed 卡（同款缩小） + 右独立评语卡 ── */
-.search-head{margin:0 0 10px;font-size:13px;color:var(--yx-muted)}
-.srow{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
-.fcard{overflow:hidden;border-radius:var(--r-card);border:1px solid var(--glass-line);
+/* ── 搜索结果页（2026-08 设计定稿 3a：页标题 + AI 摘要卡 + 单卡整合） ── */
+.page-title{margin:2px 0 12px;font-size:19px;font-weight:800;line-height:1.375;
+  overflow-wrap:anywhere}
+.sumcard{border-radius:var(--r-card);border:1px solid var(--glass-line);
   background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  box-shadow:var(--shadow-card)}
-.fcard-s{flex:0 0 200px;min-width:0;cursor:pointer}
-.fcard-media{position:relative;background:var(--black-04);aspect-ratio:4/3}
-.fcard-media img{width:100%;height:100%;object-fit:cover;display:block}
-.fcard-badges{position:absolute;left:8px;top:8px;display:flex;flex-wrap:wrap;gap:6px}
-.fcard-badges-flat{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-.fcard-nomedia{display:flex;align-items:center;justify-content:center;text-align:center;
-  min-height:96px;padding:12px;background:var(--black-04);
-  color:var(--yx-faint);font-size:12px;line-height:1.45}
-.fcard-body{padding:8px 10px 10px}
-.fcard-title{margin:0;font-size:13px;font-weight:500;line-height:1.375;
+  box-shadow:var(--shadow-card);padding:14px;margin-bottom:14px}
+.sumcard b{display:block;margin-bottom:4px;font-size:11px;font-weight:600;
+  color:var(--yx-tag-strong)}
+.sumcard p{margin:0;font-size:13px;line-height:1.6;color:var(--text-75)}
+.scard{display:block;border-radius:var(--r-card);border:1px solid var(--glass-line);
+  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
+  box-shadow:var(--shadow-card);padding:12px;margin-bottom:12px;cursor:pointer}
+.scard-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.scard-body{display:flex;gap:10px;align-items:stretch}
+/* 缩略图 150 定宽，高度随图在 4:3~3:4 间自适应（data-ratio 由 JS 钳制，CSS 4:3 兜底）；
+   比右列矮的宽图居中对齐 */
+.scard-media{flex:0 0 150px;min-width:0;border-radius:12px;overflow:hidden;
+  background:var(--black-04);aspect-ratio:4/3;align-self:center}
+.scard-media img{width:100%;height:100%;object-fit:cover;display:block}
+.scard-main{display:flex;flex-direction:column;min-width:0;flex:1}
+.scard-title{margin:0;font-size:14px;font-weight:500;line-height:1.4;
   color:var(--yx-ink);display:-webkit-box;-webkit-line-clamp:2;
   -webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
-.fcard-meta{margin:5px 0 0;font-size:11px;color:var(--yx-faint);
+.scard-desc{margin:6px 0 0;font-size:12px;line-height:1.5;color:var(--yx-muted);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;overflow-wrap:anywhere}
+.scard-meta{margin:6px 0 0;font-size:11px;color:var(--yx-faint);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fcard-foot{margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:6px}
-.fcard-seller{display:flex;align-items:center;gap:5px;min-width:0}
-.fcard-seller-name{font-size:11px;color:var(--yx-muted);
+.scard-foot{margin-top:auto;padding-top:8px;display:flex;align-items:center;
+  justify-content:space-between;gap:6px}
+.scard-title+.scard-desc+.scard-meta+.scard-foot,
+.scard>.scard-foot{margin-top:8px}
+.scard-seller{display:flex;align-items:center;gap:5px;min-width:0}
+.scard-seller-name{font-size:11px;color:var(--yx-muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fcard-price{flex:none;font-size:13px;font-weight:600;color:var(--yx-price)}
-/* 评语卡：独立玻璃卡 + 紫左线（--yx-tag 图形专用做左线，文字用 strong 档保对比度） */
-.fnote{flex:1;min-width:0;border-radius:var(--r-card);
-  border:1px solid var(--glass-line);border-left:3px solid var(--yx-tag);
-  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  box-shadow:var(--shadow-card);padding:12px 14px;font-size:13px;
-  line-height:1.55;color:var(--text-75)}
-.fnote b{display:block;margin-bottom:3px;font-size:11px;font-weight:600;
-  color:var(--yx-tag-strong)}
-.fnote-link{display:inline-block;margin-top:6px;font-size:11px;color:var(--yx-muted)}
-/* 窄窗（agent 浏览器常开在侧栏）：行摆不下就上下叠，卡片回到通栏 */
-@media (max-width:480px){
-  .srow{flex-direction:column;gap:8px}
-  .fcard-s{flex-basis:auto;width:100%}
-}
+.scard-price{flex:none;font-size:15px;font-weight:600;color:var(--yx-price)}
+/* AI 评语条：卡内通栏 */
+.scard-ai{margin-top:10px;border-radius:10px;background:var(--yx-ai-bg);
+  padding:8px 10px;font-size:12px;line-height:1.55;color:var(--text-75)}
+.scard-ai b{font-weight:600;color:var(--yx-tag-strong)}
+.scard-ai-link{font-size:11px;color:var(--yx-muted);white-space:nowrap}
 
-/* 徽章三档（CardTag 快照：压图 onCover 与卡内 flat 两套底色） */
+/* 徽章（2026-08 设计定稿：一律不压图，只剩 flat 档底色） */
 .badge{display:inline-block;border-radius:var(--r-pill);padding:3px 9px;
   font-size:11px;font-weight:400;line-height:1.2}
-.badge-plain.badge-cover{background:rgba(255,255,255,.92);color:var(--yx-ink)}
-.badge-plain.badge-flat{background:var(--black-05);color:var(--yx-ink)}
-.badge-wanted.badge-cover{background:rgba(237,233,255,.92);color:var(--yx-tag-strong)}
-.badge-wanted.badge-flat{background:var(--yx-tag-bg-strong);color:var(--yx-tag-strong)}
+.badge-plain{background:var(--black-05);color:var(--yx-ink)}
+.badge-wanted{background:var(--yx-tag-bg-strong);color:var(--yx-tag-strong)}
 .badge-status{background:var(--yx-ink);color:var(--text-inverse)}
 
 /* 预设头像（确定性渐变 + 首字符） */
@@ -95,30 +103,36 @@ button{font:inherit;cursor:pointer}
 .av-18{width:18px;height:18px;font-size:10px}
 .av-44{width:44px;height:44px;font-size:18px}
 
-/* ── 商品详情页 ── */
+/* ── 商品详情页（2026-08 设计定稿 3b：信息三段式） ── */
 .detail-bar{position:relative;display:flex;align-items:center;justify-content:center;
   padding:6px 0 14px}
 .detail-bar-title{font-size:15px;font-weight:600}
+/* 返回圆钮：Web 同款箭头 SVG（弃 ‹ 字符——基线对不齐的根因），玻璃圆钮档 .75/25 */
 .backbtn{position:absolute;left:0;width:36px;height:36px;border-radius:50%;
-  border:1px solid var(--glass-line);background:var(--glass-card);
-  -webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  font-size:20px;line-height:1;color:var(--yx-ink);display:flex;
-  align-items:center;justify-content:center}
-.gallery{margin-bottom:6px}
+  border:1px solid var(--glass-line);background:var(--glass-nav);
+  -webkit-backdrop-filter:blur(25px);backdrop-filter:blur(25px);
+  color:var(--yx-ink);display:flex;align-items:center;justify-content:center;padding:0}
+.backbtn svg{display:block}
+.gallery{margin-bottom:12px}
 .gmain{position:relative;border-radius:var(--r-media);overflow:hidden;
   border:1px solid var(--glass-line);background:var(--yx-bg);aspect-ratio:4/3}
-.gmain img{width:100%;height:100%;object-fit:contain;display:block}
+.gmain img{width:100%;height:100%;object-fit:contain;display:block;cursor:zoom-in}
 .gcount{position:absolute;right:10px;bottom:10px;border-radius:var(--r-pill);
   padding:3px 10px;font-size:11px;font-weight:500;color:var(--text-inverse);
   background:rgba(0,0,0,.55);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
   font-variant-numeric:tabular-nums;pointer-events:none}
-.gthumbs{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px}
+/* 缩略条：容器右缘露半格暗示可滑 */
+.gthumbs{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding:0 26px 2px 0}
 .gthumb{flex:none;width:52px;height:52px;padding:0;border-radius:10px;overflow:hidden;
   border:2px solid transparent;background:var(--black-04);opacity:.7}
 .gthumb.on{border-color:var(--yx-ink);opacity:1}
 .gthumb img{width:100%;height:100%;object-fit:cover;display:block}
-.gallery-empty{min-height:120px;border-radius:var(--r-media)}
-.photo-note{margin:6px 0 0;font-size:11px;color:var(--yx-faint)}
+.ghint{margin:6px 0 0;font-size:11px;color:var(--yx-faint)}
+.fcard-nomedia{display:flex;align-items:center;justify-content:center;text-align:center;
+  min-height:96px;padding:12px;background:var(--black-04);
+  color:var(--yx-faint);font-size:12px;line-height:1.45}
+.gallery-empty{min-height:120px;border-radius:var(--r-media);margin-bottom:12px}
+.photo-note{margin:-6px 0 12px;font-size:11px;color:var(--yx-faint)}
 .load-state{display:flex;align-items:center;gap:8px;margin:0 0 10px;
   border-radius:var(--r-inner);background:var(--yx-tag-bg);padding:9px 12px;
   color:var(--yx-tag-strong);font-size:12px;line-height:1.45}
@@ -127,41 +141,55 @@ button{font:inherit;cursor:pointer}
   border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spinner{animation-duration:1.8s}}
-.dtitle{margin:16px 0 0;font-size:19px;font-weight:700;line-height:1.375;
+/* 玻璃信息卡（主信息卡 / 发帖人卡共用外壳） */
+.dcard{border-radius:var(--r-card);border:1px solid var(--glass-line);
+  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
+  box-shadow:var(--shadow-card);padding:14px;margin-top:12px}
+.dtitle{margin:8px 0 0;font-size:19px;font-weight:700;line-height:1.375;
   overflow-wrap:anywhere}
-.dprice-row{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.dprice-row{display:flex;align-items:baseline;gap:8px;margin-top:8px;flex-wrap:wrap}
 .dprice{font-size:24px;font-weight:700;color:var(--yx-price)}
+.dnegotiable{font-size:12px;color:var(--yx-muted)}
 .dchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
 .chip{display:inline-block;border-radius:var(--r-pill);padding:3px 9px;font-size:11px;
   font-weight:500;background:var(--black-05);color:var(--text-75)}
-.flaw{margin-top:12px;border-radius:var(--r-inner);border:1px solid var(--glass-line);
-  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  padding:12px 14px;font-size:12px;line-height:1.5;color:var(--text-75)}
-.flaw b{display:block;margin-bottom:2px;font-weight:600;color:var(--yx-ink)}
+/* 瑕疵说明并入主信息卡：顶边分隔线下，label 与正文同行起排 */
+.dflaw{margin-top:12px;padding-top:12px;border-top:1px solid var(--yx-line-weak);
+  font-size:12px;line-height:1.5;color:var(--text-75)}
+.dflaw b{font-weight:600;color:var(--yx-ink);margin-right:8px}
 .alert{margin-top:12px;border-radius:var(--r-inner);background:var(--yx-tag-bg);
   padding:12px 14px;font-size:12px;line-height:1.5;color:var(--yx-tag-strong)}
-.seller{display:flex;align-items:center;gap:10px;margin-top:14px;
-  border-radius:var(--r-inner);border:1px solid var(--glass-line);
-  background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
-  padding:12px 14px}
-.seller-name{font-size:14px;font-weight:600;min-width:0;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.verify{flex:none;border-radius:var(--r-pill);background:var(--yx-tag-bg);
-  padding:2px 8px;font-size:11px;font-weight:500;color:var(--yx-tag-strong)}
+.alert b{margin-right:6px}
 .desc{margin-top:12px;border-radius:var(--r-media);background:var(--yx-card);
   border:1px solid var(--yx-line);padding:16px;font-size:14px;line-height:1.7;
   color:var(--text-75);white-space:pre-wrap;overflow-wrap:anywhere}
+/* 发帖人卡：昵称 + 确认在售副行 + 学士帽校名胶囊（全称 truncate） */
+.dseller{display:flex;align-items:center;gap:10px}
+.seller-body{display:grid;gap:2px;min-width:0;flex:1}
+.seller-name{font-size:14px;font-weight:600;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seller-sub{font-size:11px;color:var(--yx-faint)}
+.verify{flex:none;display:inline-flex;align-items:center;gap:4px;max-width:45%;
+  border-radius:var(--r-pill);background:var(--yx-tag-bg);
+  padding:3px 9px;font-size:11px;font-weight:500;color:var(--yx-tag-strong)}
+.verify svg{flex:none}
+.verify span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 吸底 CTA（CTA_DOCK 快照：黑胶囊 + 深投影 + 上沿渐变托底；
    渐变透明侧必须手写 rgba(240,240,243,0)，Safari 的 transparent 会先发灰） */
 .cta-dock{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:24px 16px 18px;
   background:linear-gradient(180deg,rgba(240,240,243,0),var(--yx-bg) 40%)}
-.cta-dock>*{max-width:608px;margin-left:auto;margin-right:auto}
+.cta-dock>*{max-width:398px;margin-left:auto;margin-right:auto}
 .cta{display:flex;width:100%;align-items:center;justify-content:center;
   border:0;border-radius:var(--r-pill);padding:14px 16px;font-size:15px;font-weight:500;
   background:var(--yx-ink);color:var(--text-inverse);box-shadow:var(--shadow-cta)}
 .cta:hover{background:var(--yx-ink-hover)}
 .cta:disabled{opacity:.5;cursor:not-allowed}
 .cta-link{text-decoration:none;box-sizing:border-box}
+
+/* ── 大图放大浮层（点主图开，纯页面本地行为） ── */
+.lightbox{position:fixed;inset:0;z-index:70;display:flex;align-items:center;
+  justify-content:center;background:rgba(0,0,0,.85);padding:16px;cursor:zoom-out}
+.lightbox img{max-width:100%;max-height:100%;object-fit:contain}
 
 /* ── 联系方式弹层（对齐 Web 端 0812 定稿：玻璃卡置中、邮箱最前、逐条复制） ── */
 .modal-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:center;

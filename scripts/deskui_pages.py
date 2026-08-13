@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+from datetime import datetime
 from pathlib import Path
 
 # 静态资源在 assets/：产物里 scripts/ 与 assets/ 并排，源码树里 kernel/scripts/ 与
@@ -127,8 +128,9 @@ def price_text(listing: dict) -> str:
     return f"{prefix}{_amount(price)}"
 
 
-def card_badges(listing: dict, *, on_cover: bool) -> str:
-    """帖型徽章 + （非在售时）状态徽章。
+def card_badges(listing: dict) -> str:
+    """帖型徽章 + （非在售时）状态徽章。**一律不压图**（2026-08 设计定稿），
+    统一放标题上方，只剩 flat 一档底色。
 
     tone 两维取并（同 ListingCard 的 CardTag）：求购 ∨ accent=strong → wanted 档
     （紫，文字用 --yx-tag-strong 保对比度）；否则 plain 档。
@@ -137,8 +139,7 @@ def card_badges(listing: dict, *, on_cover: bool) -> str:
     wanted = is_wanted(listing)
     label = meta["buy"] if wanted else meta["sell"]
     tone = "wanted" if (wanted or meta["accent"] == "strong") else "plain"
-    place = "cover" if on_cover else "flat"
-    badges = [f'<span class="badge badge-{tone} badge-{place}">{esc(label)}</span>']
+    badges = [f'<span class="badge badge-{tone}">{esc(label)}</span>']
     status = listing.get("status")
     if status and status != "ON_SALE":
         status_label = (BUY_STATUS_LABEL if wanted else STATUS_LABEL).get(status)
@@ -173,6 +174,38 @@ def act(action: dict) -> str:
     return f"data-act='{esc(json.dumps(action, ensure_ascii=False))}'"
 
 
+# 返回箭头 / 学士帽（2026-08 设计定稿：Web 同款 SVG，弃 `‹` 字符与 🎓 emoji——
+# 前者基线对不齐是老问题，后者跨平台渲染不稳）。集市文本永远进不了这两段。
+ARROW_SVG = ('<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+             'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+             'stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>')
+SCHOLAR_SVG = ('<svg viewBox="0 0 24 24" width="11" height="11" fill="none" '
+               'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+               'stroke-linejoin="round" aria-hidden="true">'
+               '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>'
+               '<path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>')
+
+
+def relative_time_note(iso: str | None) -> str:
+    """「x 前」的近似口径（发帖人卡的确认在售副行用）。解析不了就空着不猜。"""
+    if not iso:
+        return ""
+    try:
+        then = datetime.fromisoformat(str(iso).replace(" ", "T").replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    now = datetime.now(then.tzinfo) if then.tzinfo else datetime.now()
+    seconds = (now - then).total_seconds()
+    if seconds < 60:
+        return "刚刚"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} 分钟前"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} 小时前"
+    return f"{int(seconds // 86400)} 天前"
+
+
 # 确定性预设头像（对 frontend/src/lib/presetAvatar.ts 的简化）：id 哈希挑一对
 # tokens 里的 avatar-* 渐变色 + 昵称首字符。同一个人永远同一个色。
 _AVATAR_PAIRS = 6  # av-0 … av-5，色值在 deskui.css
@@ -186,7 +219,7 @@ def avatar(user_id, nickname, size_class: str) -> str:
             f'{esc(initial)}</span>')
 
 
-# ---------------------------------------------------------------- 搜索结果页（一行一件：左小 Feed 卡 + 右 AI 评语卡）
+# ---------------------------------------------------------------- 搜索结果页（2026-08 设计定稿 3a：单卡整合）
 
 
 def _seller_line(item: dict) -> tuple[str, str]:
@@ -204,25 +237,29 @@ def _seller_line(item: dict) -> tuple[str, str]:
     return meta_part, foot
 
 
+def _first_paragraph(text) -> str:
+    """无图卡的描述补位取**首段**（第一个非空行）。"""
+    for line in str(text or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
 def search_view(payload: dict) -> str:
     items = payload.get("items") or []
     if not items:
         return '<div class="empty">这一屏还没有东西 —— 等 agent 摊出来</div>'
-    cards = []
+    parts = []
+    query = payload.get("query")
+    if query:
+        parts.append(f'<h1 class="page-title">「{esc(query)}」</h1>')
+    # AI 搜索摘要卡（设计定稿 3a）：agent 的呈现纪律四件套摊在这里；缺省整卡不渲染
+    if payload.get("summary"):
+        parts.append(f'<section class="sumcard"><b>AI 搜索摘要</b>'
+                     f'<p>{esc(payload["summary"])}</p></section>')
     for item in items:
         meta = card_meta_of(item)
         open_act = act({"type": "open_listing", "listingId": item["listingId"]})
-        # 七项①图：没有就出兜底占位块（徽章降级进正文行），**禁止静默变纯文字**
-        if item.get("cover"):
-            media = (f'<div class="fcard-media">'
-                     f'<img src="{esc(item["cover"])}" alt="" data-ratio '
-                     f'loading="lazy" decoding="async">'
-                     f'<div class="fcard-badges">{card_badges(item, on_cover=True)}</div></div>')
-            flat_badges = ""
-        else:
-            media = (f'<div class="fcard-nomedia">'
-                     f'{esc(item.get("coverNote") or FALLBACK["cover"])}</div>')
-            flat_badges = f'<div class="fcard-badges-flat">{card_badges(item, on_cover=False)}</div>'
         # meta 行：✓校名 · 成色(按帖型显隐) · 位置 · 远近 —— 缺项写「未知/未写」，
         # 成色是唯一合法缺席（showCondition=false 的帖型，错位比缺席更误导）
         verified_part, seller_foot = _seller_line(item)
@@ -232,28 +269,34 @@ def search_view(payload: dict) -> str:
         meta_parts.append(item.get("location") or FALLBACK["location"])
         meta_parts.append(item.get("distanceNote") or "")
         meta_line = " · ".join(esc(part) for part in meta_parts if part)
-        # 七项⑦链接：评语卡尾部给网页版入口（卡片整体是进详情页的动作，不是链接）
-        web_link = (f'<a class="fnote-link" href="{esc(item["url"])}" target="_blank" '
-                    f'rel="noreferrer">网页版打开 ↗</a>') if item.get("url") else ""
-        # 一行一件（0.38.1 业主定稿）：左边是**和首页 Feed 完全同款**的卡（缩小一号），
-        # 右边独立一张评语卡放 AI 的看法 —— 卡是卡、评语是评语，别焊在一起。
-        cards.append(
-            f'<div class="srow">'
-            f'<article class="fcard fcard-s" role="button" tabindex="0" {open_act}>'
-            f'{media}<div class="fcard-body">{flat_badges}'
-            f'<h3 class="fcard-title">{esc(item.get("title") or FALLBACK["title"])}</h3>'
-            f'<p class="fcard-meta">{meta_line}</p>'
-            f'<div class="fcard-foot">'
-            f'<span class="fcard-seller">{avatar(None, seller_foot, "av-18")}'
-            f'<span class="fcard-seller-name">{esc(seller_foot)}</span></span>'
-            f'<span class="fcard-price">{esc(price_text(item))}</span>'
-            f'</div></div></article>'
-            f'<aside class="fnote"><b>AI 的看法</b>'
-            f'<span>{esc(item.get("aiNote") or FALLBACK["note"])}</span>{web_link}</aside>'
-            f'</div>')
-    query = payload.get("query")
-    head = (f'<p class="search-head">「{esc(query)}」的结果</p>' if query else "")
-    return head + "".join(cards)
+        foot = (f'<div class="scard-foot">'
+                f'<span class="scard-seller">{avatar(None, seller_foot, "av-18")}'
+                f'<span class="scard-seller-name">{esc(seller_foot)}</span></span>'
+                f'<span class="scard-price">{esc(price_text(item))}</span></div>')
+        title = f'<h3 class="scard-title">{esc(item.get("title") or FALLBACK["title"])}</h3>'
+        # 七项①图：有图 = 左图右文；无图 = 去掉图位，描述首段补位（**禁止静默留白**——
+        # 没描述也有 coverNote/兜底文案顶上，主人得知道这条为什么没图）
+        if item.get("cover"):
+            body = (f'<div class="scard-body">'
+                    f'<div class="scard-media"><img src="{esc(item["cover"])}" alt="" '
+                    f'data-ratio loading="lazy" decoding="async"></div>'
+                    f'<div class="scard-main">{title}'
+                    f'<p class="scard-meta">{meta_line}</p>{foot}</div></div>')
+        else:
+            desc = (_first_paragraph(item.get("description"))
+                    or item.get("coverNote") or FALLBACK["cover"])
+            body = (f'{title}<p class="scard-desc">{esc(desc)}</p>'
+                    f'<p class="scard-meta">{meta_line}</p>{foot}')
+        # 七项⑦链接：评语条尾缀给网页版入口（卡片整体是进详情页的动作，不是链接）
+        web_link = (f'<a class="scard-ai-link" href="{esc(item["url"])}" target="_blank" '
+                    f'rel="noreferrer">网页版 ↗</a>') if item.get("url") else ""
+        ai_strip = (f'<div class="scard-ai"><span><b>AI：</b>'
+                    f'{esc(item.get("aiNote") or FALLBACK["note"])} {web_link}</span></div>')
+        parts.append(
+            f'<article class="scard" role="button" tabindex="0" {open_act}>'
+            f'<div class="scard-badges">{card_badges(item)}</div>'
+            f'{body}{ai_strip}</article>')
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------- 商品详情页
@@ -270,11 +313,16 @@ def listing_view(payload: dict) -> str:
             f'loading="lazy" decoding="async"></button>'
             for i, u in enumerate(photos))
         count = (f'<span class="gcount">1/{len(photos)}</span>' if len(photos) > 1 else "")
+        # 主图容器钳制 4:3~1:1（设计定稿收紧线上 3:4 上限；data-ratio-min 给 JS 读）、
+        # 点大图放大（deskui.js 的本地行为，不产生回传动作）
+        hint = (f'左滑查看全部 {len(photos)} 张 · 点大图放大' if len(photos) > 1
+                else '点大图放大')
         gallery = (f'<div class="gallery"><div class="gmain">'
                    f'<img id="gmain-img" src="{esc(photos[0])}" alt="" data-ratio '
-                   f'decoding="async" fetchpriority="high">{count}</div>'
+                   f'data-ratio-min="1" data-lightbox decoding="async" '
+                   f'fetchpriority="high">{count}</div>'
                    + (f'<div class="gthumbs">{thumbs}</div>' if len(photos) > 1 else "")
-                   + "</div>")
+                   + f'<p class="ghint">{hint}</p></div>')
     else:
         gallery = f'<div class="fcard-nomedia gallery-empty">{esc(FALLBACK["cover"])}</div>'
     photo_note = ('<p class="photo-note">参考图 · TA 想要的大概是这样，不是实物</p>'
@@ -287,16 +335,25 @@ def listing_view(payload: dict) -> str:
     if meta["show_condition"]:
         prefix = "最低接受 " if is_wanted(listing) else ""
         chips.append(f'<span class="chip">{prefix}{esc(condition_label(listing.get("itemCondition")) or FALLBACK["condition"])}</span>')
-    if listing.get("negotiable"):
-        chips.append('<span class="chip">可议价</span>')
     chips.append(f'<span class="chip">{esc(listing.get("location") or FALLBACK["location"])}</span>')
     for method in (listing.get("deliveryMethods") or []):
         label = {"PICKUP": "自提", "SHIPPING": "邮寄", "LOCAL_DELIVERY": "同城送"}.get(method)
         if label:
             chips.append(f'<span class="chip">{esc(label)}</span>')
 
-    flaw = (f'<div class="flaw"><b>瑕疵说明</b><span>{esc(listing["flawNote"])}</span></div>'
+    # 主信息卡（设计定稿 3b 信息三段式之一）：徽章 → 标题 → 价格行（「可议价」从
+    # chips 移进来同行）→ chips → 分隔线下并入瑕疵说明（无 flawNote 整段不渲染）
+    negotiable = ('<span class="dnegotiable">可议价</span>'
+                  if listing.get("negotiable") else "")
+    flaw = (f'<div class="dflaw"><b>瑕疵说明</b><span>{esc(listing["flawNote"])}</span></div>'
             if listing.get("flawNote") else "")
+    main_card = (f'<section class="dcard">'
+                 f'<div class="scard-badges">{card_badges(listing)}</div>'
+                 f'<h1 class="dtitle">{esc(listing.get("title") or FALLBACK["title"])}</h1>'
+                 f'<div class="dprice-row"><span class="dprice">{esc(price_text(listing))}</span>'
+                 f'{negotiable}</div>'
+                 f'<div class="dchips">{"".join(chips)}</div>{flaw}</section>')
+
     # 转载 Alert 文案对齐 Web（ListingDetail.tsx）：有链接引导去原帖，没链接给搜索指引
     repost_alert = ""
     if payload.get("isRepost"):
@@ -305,12 +362,21 @@ def listing_view(payload: dict) -> str:
         repost_alert = (f'<div class="alert"><b>转载自小红书</b>'
                         f'这条帖子是从小红书转载的，发帖账号无法站内私信。{guide}</div>')
 
+    # 发帖人卡：副行「x 前确认在售」只在卖家真确认过时出现（refreshedAt 明显晚于
+    # createdAt 才是确认信号——Web 端 0807 两时间点模型的同款判定，别拿发布时间冒充）
     verified = listing.get("sellerVerifiedSchool")
     seller_name = listing.get("sellerNickname") or FALLBACK["seller"]
-    seller_card = (f'<div class="seller">{avatar(listing.get("sellerUserId"), seller_name, "av-44")}'
-                   f'<span class="seller-name">{esc(seller_name)}</span>'
-                   + (f'<span class="verify">🎓 {esc(verified)}</span>' if verified else "")
-                   + "</div>")
+    confirmed = ""
+    refreshed, created = listing.get("refreshedAt"), listing.get("createdAt")
+    if refreshed and created and str(refreshed) > str(created):
+        note = relative_time_note(refreshed)
+        confirmed = f'<span class="seller-sub">{esc(note)}确认在售</span>' if note else ""
+    school = (f'<span class="verify">{SCHOLAR_SVG}<span>{esc(verified)}</span></span>'
+              if verified else "")
+    seller_card = (f'<section class="dcard dseller">'
+                   f'{avatar(listing.get("sellerUserId"), seller_name, "av-44")}'
+                   f'<span class="seller-body"><span class="seller-name">{esc(seller_name)}</span>'
+                   f'{confirmed}</span>{school}</section>')
 
     # CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx，null = 这一态没有 CTA）：
     # ① 自己的帖子 → 无 CTA；② 转载有链接 → 外跳原帖；③ 转载没链接 → 无 CTA
@@ -334,15 +400,12 @@ def listing_view(payload: dict) -> str:
                   f'{esc(payload.get("loadError"))}</div>' if payload.get("loadError") else "")
 
     return (f'<div class="detail-bar"><button type="button" class="backbtn" '
-            f'{act({"type": "back"})} aria-label="返回">‹</button>'
+            f'{act({"type": "back"})} aria-label="返回">{ARROW_SVG}</button>'
             f'<span class="detail-bar-title">帖子详情</span></div>'
             f'{loading_state}{load_error}{gallery}{photo_note}'
-            f'<h1 class="dtitle">{esc(listing.get("title") or FALLBACK["title"])}</h1>'
-            f'<div class="dprice-row"><span class="dprice">{esc(price_text(listing))}</span>'
-            f'{card_badges(listing, on_cover=False)}</div>'
-            f'<div class="dchips">{"".join(chips)}</div>'
-            f'{flaw}{repost_alert}{seller_card}'
+            f'{main_card}{repost_alert}'
             f'<div class="desc">{esc(listing.get("description") or FALLBACK["description"])}</div>'
+            f'{seller_card}'
             f'{cta}<div id="overlay-root">{_contacts_modal(payload)}</div>')
 
 
