@@ -274,18 +274,21 @@ def search_view(payload: dict) -> str:
                 f'<span class="scard-seller-name">{esc(seller_foot)}</span></span>'
                 f'<span class="scard-price">{esc(price_text(item))}</span></div>')
         title = f'<h3 class="scard-title">{esc(item.get("title") or FALLBACK["title"])}</h3>'
+        # 徽章放**标题正上方**（右列内，业主 0813 定稿改进：卡顶不再单占一行，
+        # 右列的空当刚好用上）；无图卡本来就是通栏排版，徽章同样紧贴标题
+        badges = f'<div class="scard-badges">{card_badges(item)}</div>'
         # 七项①图：有图 = 左图右文；无图 = 去掉图位，描述首段补位（**禁止静默留白**——
         # 没描述也有 coverNote/兜底文案顶上，主人得知道这条为什么没图）
         if item.get("cover"):
             body = (f'<div class="scard-body">'
                     f'<div class="scard-media"><img src="{esc(item["cover"])}" alt="" '
                     f'data-ratio loading="lazy" decoding="async"></div>'
-                    f'<div class="scard-main">{title}'
+                    f'<div class="scard-main">{badges}{title}'
                     f'<p class="scard-meta">{meta_line}</p>{foot}</div></div>')
         else:
             desc = (_first_paragraph(item.get("description"))
                     or item.get("coverNote") or FALLBACK["cover"])
-            body = (f'{title}<p class="scard-desc">{esc(desc)}</p>'
+            body = (f'{badges}{title}<p class="scard-desc">{esc(desc)}</p>'
                     f'<p class="scard-meta">{meta_line}</p>{foot}')
         # 七项⑦链接：评语条尾缀给网页版入口（卡片整体是进详情页的动作，不是链接）
         web_link = (f'<a class="scard-ai-link" href="{esc(item["url"])}" target="_blank" '
@@ -294,7 +297,6 @@ def search_view(payload: dict) -> str:
                     f'{esc(item.get("aiNote") or FALLBACK["note"])} {web_link}</span></div>')
         parts.append(
             f'<article class="scard" role="button" tabindex="0" {open_act}>'
-            f'<div class="scard-badges">{card_badges(item)}</div>'
             f'{body}{ai_strip}</article>')
     return "".join(parts)
 

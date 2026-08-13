@@ -54,7 +54,7 @@ button{font:inherit;cursor:pointer}
 .scard{display:block;border-radius:var(--r-card);border:1px solid var(--glass-line);
   background:var(--glass-card);-webkit-backdrop-filter:blur(15px);backdrop-filter:blur(15px);
   box-shadow:var(--shadow-card);padding:12px;margin-bottom:12px;cursor:pointer}
-.scard-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.scard-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
 .scard-body{display:flex;gap:10px;align-items:stretch}
 /* 缩略图 150 定宽，高度随图在 4:3~3:4 间自适应（data-ratio 由 JS 钳制，CSS 4:3 兜底）；
    比右列矮的宽图居中对齐 */
