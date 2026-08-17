@@ -12,7 +12,9 @@
     {"ok": true,  "data": ...}                            # 成功
     {"ok": false, "error": {"type", "code", "message"}}   # 失败
 
-退出码：0 成功 ｜ 1 业务/越权失败 ｜ 2 未登录或登录失效 ｜ 3 网络不可达 ｜
+退出码：0 成功 ｜ 1 业务/越权失败 ｜ 2 未登录或登录失效 ｜
+       3 网络不可达（`error.type` = `network` 连不上 / `network_unavailable` 授权服务连不上 /
+         **`network_blocked` 出网被这台机器所在环境的策略拦下**，后者换环境才有用、重试无用）｜
        4 本机状态目录不可用（只读挂载/没权限）｜ 64 用法错误
 
 安全铁律（改本文件前先读一遍）：
@@ -479,11 +481,123 @@ def emit_err(e: CliError) -> None:
 
 # ---------------------------------------------------------------- HTTP
 
+# 读错误响应体的上限。**必须限长**：被拦下时对面回的常是一整页 HTML/XML 错误页，
+# 全读进来只是把一次失败拖成一次挂起。4KB 足够看出这是不是我方的 JSON 壳。
+ERROR_BODY_LIMIT = 4096
+
+
+def _read_error_body(he: "urllib.error.HTTPError") -> bytes:
+    """把 HTTPError 的响应体读出来（限长、绝不抛）。
+
+    HTTPError 的 fp 可能是 None（构造出来的、或已被读空），那时 read 会抛
+    AttributeError —— 分类逻辑不该因为"读不到 body"而崩掉，读不到就当空 body。
+    """
+    try:
+        return he.read(ERROR_BODY_LIMIT) or b""
+    except Exception:
+        return b""
+
+
+def _is_our_envelope(raw: bytes) -> bool:
+    """这段 body 是不是 findu 家族的 ApiResponse 壳（=**确实是我方服务在答话**）。
+
+    🔴 这是「业务失败」与「根本没到我方服务」之间的**唯一分叉点**，别再加第二处判定。
+       最小充分特征取 `json 能解析` + `顶层是 dict` + `含 code 键` —— 三条都是我方壳
+       的定义性特征，而沙箱网关/企业代理回的 HTML、XML、纯文本、空 body 一条都不满足。
+    🔴 **空 body 与非 JSON 一律判 False**：宁可把一次我方的畸形响应误报成"环境拦截"
+       （用户照着做的动作是换环境，无副作用），也不能把出网被封误报成"越权/登录失效"
+       （那会把人支去重新登录、去找运营方要权限，全是白费）。
+    """
+    try:
+        shell = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:
+        return False
+    return isinstance(shell, dict) and "code" in shell
+
+
+def _is_client_error(status: int) -> bool:
+    """只有 4xx 才可能是"路上的东西"在拦人。
+
+    5xx 刻意不收进来：非我方信封的 5xx 更像回源/负载均衡在抖（ALB 的 502 页面就是
+    裸 HTML），把它说成"出网被策略拦下"是同一个误读的镜像版本——只不过方向反过来。
+    """
+    return 400 <= status < 500
+
+
+# 网关/代理拒绝时唯一允许透出的响应头，且**只透出它的值**（`host_not_allowed` 这类
+# 纯枚举）。头名白名单 + 值形状白名单双闸：头内容里可能带代理地址、内网主机名、
+# 甚至临时凭证，整头透传等于让诊断信息变成新的泄漏面（见文件头安全铁律）。
+_DENY_REASON_HEADER = "x-deny-reason"
+_DENY_REASON_MAX = 40
+
+
+def _deny_reason(he: "urllib.error.HTTPError") -> str:
+    """从响应头里取出网关的拒绝原因枚举；取不到或形状不对就返回空串。"""
+    headers = getattr(he, "headers", None) or getattr(he, "hdrs", None) or {}
+    try:
+        raw = headers.get(_DENY_REASON_HEADER) or headers.get(_DENY_REASON_HEADER.title()) or ""
+    except Exception:
+        return ""
+    value = str(raw).strip()
+    if not value or len(value) > _DENY_REASON_MAX:
+        return ""
+    # 纯枚举才放行：字母数字加 _ - . 之外的一律丢掉（地址、URL、空格都会被这条挡住）
+    if not all(ch.isalnum() or ch in "_-." for ch in value):
+        return ""
+    return value
+
+
+def blocked_hosts() -> str:
+    """本产物实际要打的两个主机名。
+
+    🔴 **不写死域名**：一个产物只含一套环境的域名（见文件头），把 prod 主机名硬编码
+       进来会让 staging 产物当场撞上打包器的「外环境主机名」闸。从配置现算，
+       两套环境各说各的，永远是真话。
+    """
+    names: list[str] = []
+    for base in (site_base(), auth_api()):
+        host = urllib.parse.urlsplit(base).hostname
+        if host and host not in names:
+            names.append(host)
+    return " 与 ".join(names) if names else "集市站点"
+
+
+def _blocked_message(he: "urllib.error.HTTPError", tail: str = "") -> str:
+    """出网被拦时给 agent 的话：说清是谁拦的、点名两个域名、给三条出路。
+
+    两个域名都要点名——绑定走站点、兑换走 API，是**两个不同的分发**，
+    只放行一个仍然半瘫（绑定成、兑换败，正是 2026-08-17 那次报障的形状）。
+    """
+    reason = _deny_reason(he)
+    return (
+        f"当前网络环境无法访问 {blocked_hosts()}：HTTP {he.code} 来自路上的网关/代理"
+        f"（回的不是集市的应答体{('，拒绝原因 ' + reason) if reason else ''}），"
+        "常见于云端沙箱、企业代理的出网白名单。**这不是登录问题，也不会自愈，重试没有用。**"
+        "三条出路："
+        f"① 改在本机运行；② 让管理员把 {blocked_hosts()} 两个域名都放行（少放一个仍然半瘫）；"
+        "③ 若你在 Claude 环境里：打开 Plugins → a2hmarket → Connectors → Connect 完成登录，"
+        "然后新开一个会话，改用 a2hmarket_* 工具（那条路走服务端，不经这台机器出网）。"
+        + (f" {tail}" if tail else "")
+    )
+
+
+def _blocked_error(he: "urllib.error.HTTPError", tail: str = "") -> "CliError":
+    return CliError("network_blocked", _blocked_message(he, tail),
+                    code=str(he.code), exit_code=3)
+
+
 def _send(url: str, method: str, data: bytes | None, headers: dict,
           bearer: str | None) -> bytes:
     """发一次请求，把传输层错误翻译成 CliError，返回原始响应体。
 
     单独抽出来是为了让 call() 能在 401 之后**换一副身份重发**（见那边的匿名降级）。
+
+    🔴 **先读 body 再分类**（2026-08-17 修）：这里曾经在 `he.read()` 之前就按状态码
+       断言 401=登录失效、403=越权，body 一个字节都没看。云沙箱的出网白名单回的
+       正是 403（`x-deny-reason: host_not_allowed`，body 是 XML），于是"出网被封"
+       被报成"越权：这不是你的资源"，用户被支去找运营方要权限、反复点授权。
+       401 是同一个坑的镜像（代理回 401/407 → 被报成"登录已失效"，支人去重新登录）。
+       **状态码只在确认了对面是我方服务之后才有意义。**
     """
     h = dict(headers)
     if bearer:
@@ -492,19 +606,22 @@ def _send(url: str, method: str, data: bytes | None, headers: dict,
         with _open(url, data=data, headers=h, method=method, timeout=TIMEOUT) as resp:
             return resp.read()
     except urllib.error.HTTPError as he:
+        raw = _read_error_body(he)
+        if _is_client_error(he.code) and not _is_our_envelope(raw):
+            raise _blocked_error(he)
+        try:
+            shell = json.loads(raw.decode("utf-8", "replace"))
+        except Exception:
+            shell = None
         if he.code == 401:
             raise CliError("auth_required", "登录已失效或凭证无效：重新运行 a2hmarket.py auth login "
                            "（若刚撤销过授权，这是预期行为）", code="401", exit_code=2)
         if he.code == 403:
             raise CliError("forbidden", "越权：这不是你的资源，或该操作不属于你的角色", code="403")
-        try:
-            shell = json.loads(he.read().decode("utf-8", "replace"))
+        if isinstance(shell, dict):
             raise CliError("api", shell.get("message") or f"HTTP {he.code}",
                            code=str(shell.get("code") or he.code))
-        except CliError:
-            raise
-        except Exception:
-            raise CliError("http", f"请求失败（HTTP {he.code}）", code=str(he.code))
+        raise CliError("http", f"请求失败（HTTP {he.code}）", code=str(he.code))
     # OSError 兜到底：URLError / socket.timeout 都是它的子类，而对端中途断开连接
     # 抛的是裸的 ConnectionResetError —— 只列前两个的话那种情况会直接吐 traceback。
     except OSError as ue:
@@ -541,7 +658,10 @@ def call(base: str, method: str, path: str, *, params: dict | None = None,
         # 摘掉 Authorization 原样重发一次，退化成纯匿名视角（身份相关的字段一律按未登录算）。
         # 当前服务端对无效 Bearer 是宽容的（拿废凭证读 public 口子照样 200），
         # 这里是防它哪天收紧——真收紧了没有这一跳就是「过期用户比匿名用户权限还低」。
-        if not (e.code == "401" and auth == "optional" and tok):
+        # 🔴 判据用 `etype` 不用 `code`：出网被拦时代理同样会回 401，而那种 401 的
+        #    code 也是 "401" —— 按 code 判会去摘 Authorization 重发一次，白白多打
+        #    一发注定同样被拦的请求。只有**确认是我方服务说"你这枚凭证不行"**才降级。
+        if not (e.etype == "auth_required" and auth == "optional" and tok):
             raise
         raw = _send(url, method, data, headers, None)
     try:
@@ -564,6 +684,11 @@ def _exchange(code: str) -> tuple[str | None, str, str]:
       pending  码还没被绑定 —— 用户还没在浏览器里点「同意授权」，继续等是对的
       network  连不上授权服务 —— 再等 600 秒也不会自己好，这不是"没点同意"
 
+    🔴 出网被策略拦下（`network_blocked`）**直接向上抛，连一轮都不再等**：那是环境
+       裁决，100% 不会在 600 秒内自愈。它此前落进 `error` 这一档，于是 offline 计数
+       每轮被清零、硬轮满整个授权窗口，最后还报"授权超时"——把环境问题说成了
+       "你没点同意"。
+
     🔴 **绝不能拿业务码判成败**：兑换口对「code 还没被绑定」也回
        `{"code":"OK","message":"success"}` 且没有 data（实测），这既是轮询等待期的
        正常态，也正是路径写错时的表现（findu-user 对不存在的路径回 HTTP 200 +
@@ -575,6 +700,8 @@ def _exchange(code: str) -> tuple[str | None, str, str]:
         data = call(auth_api(), "GET", "/api/v1/public/user/agent/auth",
                     params={"code": code}, auth=False)
     except CliError as e:
+        if e.etype == "network_blocked":
+            raise
         if e.etype == "network":
             print("（授权服务暂时连不上，继续等待重试…）", file=sys.stderr)
             return None, f"{e.etype}｜{e}", "network"
@@ -585,20 +712,30 @@ def _exchange(code: str) -> tuple[str | None, str, str]:
     return None, "授权码还没被绑定（浏览器里尚未点「同意授权」，或该码已过期/已被兑换过）", "pending"
 
 
-def _auth_service_reachable() -> bool:
-    """能不能连上授权服务。**只看连接层**：有 HTTP 状态码就算通。
+def _auth_service_probe() -> "CliError | None":
+    """探一次授权服务：通就返回 None，不通就返回**该报的那个错误**。
 
     刻意不带 code 去打：这一发是探路，不是兑换，不该消耗任何东西。
+
+    🔴 **「拿到 HTTP 状态码 = 这条通路是通的」这条假设已经作废**（2026-08-17）：
+       出网白名单场景下，拒绝你的那个 4xx 恰恰来自**路上的那个东西**，不是对端。
+       照旧判"通"的后果是预检放行 → 发码 → 让用户去浏览器点三次同意 → 轮满超时。
+       现在唯一的"通"的证据是**对面回了我方的应答壳**（或者是 5xx：那说明请求
+       确实到了我方链路，只是那头在报错）。
     """
     try:
         with _open(auth_api() + "/api/v1/public/user/agent/auth",
                    headers={"Accept": "application/json"}) as response:
             response.read(1)
-    except urllib.error.HTTPError:
-        return True
+    except urllib.error.HTTPError as he:
+        if _is_client_error(he.code) and not _is_our_envelope(_read_error_body(he)):
+            return _blocked_error(he, "**没有生成授权码**，你不用去浏览器里等。")
+        return None
     except OSError:
-        return False
-    return True
+        return CliError("network_unavailable",
+                        f"连不上授权服务（{network_attempt_desc()}）：确认网络后重新运行 "
+                        "auth login。**没有生成授权码**，你不用去浏览器里等", exit_code=3)
+    return None
 
 
 # 轮询里连续这么多次都是连接层失败就收手。3 次 × 3 秒 ≈ 10 秒，足够跨过一次抖动，
@@ -614,6 +751,7 @@ def _login_preflight(*, want_session: bool) -> tuple[Path, str]:
        用户就白烧了一次授权（而他看到的还只是一个写盘异常）。
     🔴 网络不可达就立刻失败、**不生成授权码**：先把码打给用户、再让他等满超时，
        最后报"授权超时"，等于把网络故障说成了用户没点同意。
+       出网被环境策略拦下（`network_blocked`）同样拦在这一步——那条路怎么等都不会通。
     """
     if sys.version_info < MIN_PYTHON:
         raise CliError("python_unsupported",
@@ -621,10 +759,9 @@ def _login_preflight(*, want_session: bool) -> tuple[Path, str]:
                            MIN_PYTHON[0], MIN_PYTHON[1], *sys.version_info[:3]),
                        exit_code=4)
     directory, scope = resolve_state_dir(want_session=want_session, for_write=True)
-    if not _auth_service_reachable():
-        raise CliError("network_unavailable",
-                       f"连不上授权服务（{network_attempt_desc()}）：确认网络后重新运行 "
-                       "auth login。**没有生成授权码**，你不用去浏览器里等", exit_code=3)
+    failure = _auth_service_probe()
+    if failure is not None:
+        raise failure
     return directory, scope
 
 
@@ -1732,20 +1869,38 @@ def _doctor_network() -> dict:
 
     🔴 只报枚举：代理地址、代理相关环境变量的值一个字都不进输出。
        连接层异常里可能带着代理地址，所以失败时也**不回显 reason**，只给类型。
+    🔴 **「有 HTTP 状态码就算通」已废**（2026-08-17）：出网白名单场景里，那个状态码
+       是网关自己给的。非我方信封的 4xx 一律判**不通**，否则 doctor 会在沙箱里
+       报一切健康，然后 skill 自信地发起一次注定失败的授权（那正是本次报障的推手）。
     """
+    blocked = None
     for url in (site_base() + "/skill/latest.json",
                 auth_api() + "/api/v1/public/user/agent/auth"):
         try:
             with _open(url, headers={"Accept": "application/json"}) as response:
                 response.read(1)
-        except urllib.error.HTTPError:
-            pass          # 有 HTTP 状态码就说明这条通路是通的，口子怎么答不关预检的事
+        except urllib.error.HTTPError as he:
+            if _is_client_error(he.code) and not _is_our_envelope(_read_error_body(he)):
+                # 这一发被路上的东西拦了。先记着、继续探下一个 —— 第一个探的是 CDN 上的
+                # 静态对象，它本来就不回我方应答壳，单凭它判"被拦"会误伤（对象缺失时
+                # 存储也回 4xx）。**两发都不是我方在答话**才算这台机器出不去。
+                blocked = blocked or he
+                continue
+            pass          # 我方壳（或 5xx）= 请求确实到了我方链路，口子怎么答不关预检的事
         except OSError:
             continue
         return {"ok": True, "mode": network_used()}
     # 🔴 连不上时必须按**实际试过的那几条出口**说话：auto 模式下直连根本没试，
     #    说"都试过了"会把人支去排查一条没走过的通路（见 network_attempt_desc）。
     #    仍然只报枚举名与策略名 —— 地址一个字都不进来。
+    if blocked is not None:
+        reason = _deny_reason(blocked)
+        return {"ok": False, "error": "network_blocked",
+                "attempted": f"{network_attempt_desc()}；出网被这台机器所在环境的策略拒绝"
+                             f"（HTTP {blocked.code}"
+                             f"{('，拒绝原因 ' + reason) if reason else ''}，"
+                             f"回的不是集市的应答体）——换环境才有用，重试无用",
+                "hosts": blocked_hosts()}
     return {"ok": False, "error": "network_unavailable",
             "attempted": network_attempt_desc()}
 

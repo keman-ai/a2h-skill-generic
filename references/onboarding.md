@@ -31,7 +31,15 @@ python3 scripts/a2hmarket.py doctor
 - `state` 不 ok → 说清 `state.error` 是哪种存不下，再把 `state.sessionFallback.howTo`
   那条命令给出去；走这条路之前先照 `state.sessionFallback.caveat` 说清代价；
 - `network` 不 ok → 说 `network.attempted`——**本次实际试过哪几条出口**。
-  照它排查，别去查一条根本没走过的通路；
+  照它排查，别去查一条根本没走过的通路。这里有**两个分支，补救动作完全相反**：
+  - `network.error = network_unavailable` → 真的连不上（断网、服务抖）：确认网络后重试；
+  - `network.error = network_blocked` → **请求被这台机器所在环境的出网策略拒绝**
+    （云沙箱 / 企业代理的域名白名单；回话的是路上的网关，不是集市）。
+    **重试与重新授权都没用**，`network.hosts` 里那两个域名要一起放行（只放一个仍然半瘫）。
+    三条出路：① 改在本机运行；② 让管理员放行那两个域名；③ 在 Claude 环境里，
+    连上插件的 `a2hmarket` 连接器改用 `a2hmarket_*` 工具（那条路走服务端，不经本机出网）。
+    🔴 **这时不要打印授权链接、不要让主人去点「同意授权」** —— CLI 已经拦在发码之前了，
+    你也别绕过去手动发；
 - `state.scope` 已经是 `session` → 把 `state.sessionCaveat` 说给主人听：
   **这种登录不承诺跨聊天**，换个新聊天或换掉工作目录可能要重新授权一次。
 

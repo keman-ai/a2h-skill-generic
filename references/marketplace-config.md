@@ -45,6 +45,18 @@ export A2HMARKET_FRONT_BASE=<授权页站点>
 `{"ok":false,"error":{type,code,message}}`；退出码 **2**=要重新登录、**3**=网络问题、
 **4**=状态目录不可用（存不住凭证）、64=命令用法错。四者别混，补救动作完全不同。
 
+退出码 3 底下有**三种 `error.type`，补救动作不一样**：
+
+| `error.type` | 意思 | 该做什么 |
+|---|---|---|
+| `network` | 连不上服务器（断网、超时、对端抖） | 稍后重试 |
+| `network_unavailable` | 连不上授权服务（登录前预检 / 轮询期间） | 确认网络后重新 `auth login` |
+| **`network_blocked`** | **请求被这台机器所在环境的出网策略拦下**（云沙箱 / 企业代理的域名白名单：回话的是路上的网关，不是集市） | **换环境，别重试、别重新登录**——照错误正文里那三条出路走 |
+
+🔴 `network_blocked` 名字里带 network，但它**不是**"稍后会好"的那一类：出网策略是裁决，
+不会自愈。它此前被误报成"越权：这不是你的资源"和"登录已失效"（0.38.9 修），
+后果是用户被支去找运营方要权限、反复点「同意授权」，最后还等满整个授权窗口。
+
 ```bash
 python3 scripts/a2hmarket.py doctor            # 🩺 运行环境预检（只读，见下节；装不上/连不上/登录不了先跑它）
 python3 scripts/a2hmarket.py auth login        # A2H Market 授权页拿 PAT（开箱一次）
@@ -93,7 +105,7 @@ python3 scripts/a2hmarket.py doctor
 |---|---|
 | `ok` | 三段（python / network / state）全就绪才是 `true`；`optional` 缺席不拉红它 |
 | `python` | `{ok, version}`；版本过低时带 `error` |
-| `network` | `{ok, mode}`，`mode` ∈ `direct` / `system_proxy`。连不上时是 `{ok:false, error, attempted}`，`attempted` 是**本次实际试过哪几档**（`auto` 下就只有系统出口一档）。**只报枚举，不报地址** |
+| `network` | `{ok, mode}`，`mode` ∈ `direct` / `system_proxy`。连不上时是 `{ok:false, error, attempted}`，`attempted` 是**本次实际试过哪几档**（`auto` 下就只有系统出口一档）。**只报枚举，不报地址**。`error` 两种：`network_unavailable`（真连不上）/ **`network_blocked`（被出网策略拒绝）**，后者另带 `hosts`——**要一起放行的那两个域名**（只放一个仍然半瘫：绑定和兑换走的是两个分发） |
 | `state` | `{ok, scope, directory, persistent}`；存不住时带 `error`，并可能带 `sessionFallback`（`{available, directory, howTo, caveat}`）；本来就在会话级目录里时带 `sessionCaveat` |
 | `loginSupported` | 现在能不能走完一次登录（家目录存不下但会话目录可用时仍为 `true`） |
 | `optional` | `{pillow: {available, affects}}`——图片加工脚本要 Pillow，**可选能力，缺它不影响集市核心功能** |
@@ -113,6 +125,9 @@ python3 scripts/a2hmarket.py doctor
 | `auto` | 直接走系统默认出口，**不先试直连**（托管沙箱里出网只有这一条路时用） |
 
 - 降级只在**连接层**失败时发生：拿到了 HTTP 响应（哪怕 5xx）就说明这条路是通的；
+- 🔴 但**「拿到状态码」不等于「到达了集市」**：出网白名单场景下那个 4xx 是路上的网关给的。
+  判据只有一个——**回的是不是集市的应答壳**；不是，就报 `network_blocked`（见上面的退出码表），
+  换环境才有用；
 - 本次真的经了系统出口时，成功响应会多一个顶层字段 **`networkVia: "system_proxy"`**，
   `config` 里的 `proxyMode` 报的是当前策略枚举。两处都**只报枚举、不报地址**；
 - 连不上时会说清**本次实际试过哪几档**（`auto` 下就只有系统出口一档）——

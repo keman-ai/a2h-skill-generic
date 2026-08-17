@@ -102,6 +102,12 @@ def run(*args):
         if err.get("type") == "network":
             print(f"【A2H Market】集市暂时连不上（{err.get('message','')[:60]}），本次跳过巡查")
             sys.exit(0)
+        # 出网被这台机器所在环境的策略拦下：**不是集市故障，也不是登录问题**，
+        # 重试和重新授权都没用。原文里已经带着三条出路，整句给出去别改写。
+        if err.get("type") == "network_blocked":
+            print(f"【A2H Market】{err.get('message','')}")
+            print("（本次跳过巡查。上面三条出路里挑一条，别去重新登录、也别当成集市故障）")
+            sys.exit(0)
         return None
     return out.get("data")
 

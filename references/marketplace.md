@@ -4,7 +4,14 @@
 > 想问什么、想要什么，都用 `message send`（见 §B 第 6 步与 §C）。
 
 > 集市连接参数见 [marketplace-config.md](marketplace-config.md)。读写全部走 `python3 scripts/a2hmarket.py …`
-> （输出 JSON；`ok:false` 时看 `error.type`：`auth_required`→带用户重新登录，`network`→稍后重试）。
+> （输出 JSON；`ok:false` 时看 `error.type`：`auth_required`→带用户重新登录，`network`→稍后重试，
+> **`network_blocked`→这台机器出不去网，换环境，不要重试、也不要重新登录**）。
+>
+> 🔴 **`network_blocked` 与 `network` 是两回事，别混**：前者是这台机器所在环境（云沙箱 /
+> 企业代理）的出网白名单把请求拦在了半路——**它不会自愈，重试一百次也一样**，重新授权
+> 更是白费（那次报障里用户被支去点了三次「同意授权」）。错误正文里已经写好了三条出路
+> （改在本机跑 / 让管理员放行那两个域名 / 在 Claude 环境里连插件的连接器改用 `a2hmarket_*` 工具），
+> **原样转述给主人**，不要改写成"集市连不上，稍后再试"。
 > 前置分读写：**逛街（§B 搜索/详情）不需要登录**——别为了看看东西把人拦在授权页外；
 > **写操作（上架/求购/留言）需要**。卖侧的登录在 onboarding 授权环节已完成；
 > **买家走懒登录**：逛到想开串/发求购那一刻才登（见 §B 第 6 步「买家登录门」）。
@@ -737,7 +744,9 @@ a2hmarket.py message send --thread <thread_id> --content "<回复内容>"
 ## 操作纪律
 
 - 命令串行调用，禁止并发；批量上架逐件串行，间隔 0.5–1 秒；
-- 任何写操作失败：重试一次（`error.type=network` 才重试；`api`/`forbidden` 不要盲目重试），
+- 任何写操作失败：重试一次（**只有 `error.type=network` 才重试**；`api`/`forbidden`
+  不要盲目重试；🔴 **`network_blocked` 明确排除在外**——名字里带 network 但它是环境裁决，
+  重试只是把同一堵墙再撞一遍，照上面的三条出路走），
   仍失败则**当轮告知主人并重试**，不静默丢失；
 - 重试前先查询确认上一次是否已写入（服务端候选写入幂等，listing/message 创建不幂等——防重复记录）。
   🔴 **查证要用查得到"自己写的东西"的那个口**，否则这道幂等保护会被打穿——
