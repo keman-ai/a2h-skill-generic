@@ -68,7 +68,7 @@ python3 scripts/a2hmarket.py listing create …  # 上架（完整命令表见 m
 - 凭证：环境变量 `A2HMARKET_TOKEN` 优先（必须以 `a2h_pat_` 开头，否则直接报错，
   防粘错东西后表现成"莫名其妙全 401"），其次**状态目录**下的 `credentials.json`
   （0600，login 自动写入；状态目录是哪个见下面「状态目录与三种登录结果」）；
-- **token 绝不进任何本地文件/日志/URL/聊天记录**；撤销用 `a2hmarket.py auth logout --revoke`
+- **token 明文只落在上面那个状态目录的 `credentials.json`（0600）；除此之外绝不进任何其他本地文件/日志/URL/聊天记录**；撤销用 `a2hmarket.py auth logout --revoke`
   或 `auth tokens` 查出 id 后 `auth revoke <id>`（主站的「我的授权」页面是等价入口）；
 - 照片：listing 的 `photos` 只存 http(s) 公开读地址。本地图片走 `a2hmarket.py photo upload <路径>`
   换回 `publicUrl` 再上架（三步契约由 CLI 封装：换签名 → 直传对象存储 → 拿 publicUrl 上架）。

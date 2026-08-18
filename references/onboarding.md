@@ -179,8 +179,8 @@ python3 scripts/a2hmarket.py auth login --session
 🔴 **ChatGPT 的 Web Work 是 best-effort 路径，不是 OpenAI 承诺的正式 standalone 安装面**——
 能跑通就用，跑不通不算产品故障；**正式的 Web 分发仍然是 Plugin**。别向用户许诺它一直可用。
 
-🔴 PAT 明文只在兑换那一刻出现在进程内存里：**不进 URL**（URL 全程只有一次性码）、不进日志、
-不进任何本地文件、不发给任何人。
+🔴 PAT 明文的唯一落点是状态目录的 `credentials.json`（0600，目录 0700）；除此之外
+**不进 URL**（URL 全程只有一次性码）、不进日志、不进任何其他本地文件、不发给任何人。
 
 撤销授权（都立即生效、不可逆）：
 
