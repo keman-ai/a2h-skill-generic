@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.38.10
+  version: 0.39.0
   clawdbot:
     emoji: "🛒"
     requires:
@@ -109,7 +109,7 @@ metadata:
    - **后续相关动作**：档案仍缺项时可再提，但**同一会话同类提醒最多一次**（认证与
      补档案各算一类）——提醒的目的是让买卖更容易成，不是唠叨。
 2. **发帖**——卖家 `listing create`（先 `photo upload` 拿图片 URL）；买家 `listing create --trade-type BUY`。
-3. **搜寻**——`market list` 带 `--keyword` / `--category` / `--trade-type` 找对家。
+3. **搜寻**——`market list` 带 `--keyword` / `--card 场景名` / `--trade-type` 找对家。
 4. **开串**——想聊的一方 `message send --listing <帖子ID> --content "..."`，得到一条私密留言串
    （`threadId`）。串只有双方可见。
 5. **议价**——后续都用 `message send --thread <串ID>`。策略见 [negotiation.md](references/negotiation.md)；
@@ -179,41 +179,42 @@ metadata:
 > 会脏、会跟事实对不上的东西。老用户不想听，一句话就能打断
 > （速览永远让位于用户的事，见 [onboarding.md](references/onboarding.md) 的报到规则）。
 
-## 先判卡（建档类意图的第一步）
+## 先判场景（建档类意图的第一步）
 
 用户要**发任何帖**（卖/求购/转租/帮带/拼车/找搭子……）时，先判定这是 15 张
-**要素卡**里哪一张的事，读对应的 card-*.md，再走下面场景路由里的建档工序：
+**要素卡**里哪一张的事，读对应的 card-*.md，再走下面场景路由里的建档工序。
+🔴 卡只决定**问什么、正文怎么写**：发帖**没有帖型参数**，集市会按标题正文自动
+把帖子归到 25 个场景之一（落在帖子 `tags` 的第一项，如「物品交易」「长租房源」）。
 
 - **判卡依据 = 用户语义，不问用户**（守「一句话就能发」——不要拿"你要发哪类帖"
   去考用户）；供给/需求两侧同一张卡（方向进卡内的供/需节）；
 - **混合帖按主体归卡**（0811 拍板）：出衣服顺带说"回国可代购"→ 主体是出物，
-  归 GOODS，代购意向照常写进描述；三条实测边界：住宿预订转让（酒店房券/单晚）
-  → RENTAL、餐厅代金券 → GOODS、演出/球赛/电影/典礼等**活动入场票** + 交通票 → TICKET；
+  归二手出售卡，代购意向照常写进描述；三条实测边界：住宿预订转让（酒店房券/单晚）
+  → 转租卡、餐厅代金券 → 二手出售卡、演出/球赛/电影/典礼等**活动入场票** + 交通票 → 转票卡；
 - 判定后：建档要素、价格/时间语义、描述骨架、确认门回显行都以**该卡为准**；
-  `listing create` / `listing update` 时把卡的枚举传 `--card`（大写），
-  **判错了 `listing update <id> --card <新值>` 可改**，不用删帖重发；
-- 都对不上 → 无专卡，走通用建档工序，`--card OTHER`（或不传）。
+  把卡里要的要素**写进正文**（成色、瑕疵、地点、成交方式都没有单独参数）；
+- 都对不上 → 无专卡，走通用建档工序。
 
-| 用户意图（关键词） | 读哪张卡 | `--card` |
+| 用户意图（关键词） | 读哪张卡 | 集市场景名（`tags[0]`，读侧过滤用） |
 |---|---|---|
-| 卖闲置 / 清东西 / 清仓合集 / 求购某件实物 | [card-goods.md](references/card-goods.md) | GOODS |
-| 转票 / 出票 / 收票（演出/球赛/电影/典礼等活动入场票、火车票） | [card-ticket.md](references/card-ticket.md) | TICKET |
-| 出借 / 求借（学士服/相机/行李箱/工具，不换主） | [card-lend.md](references/card-lend.md) | LEND |
-| 转租 / 招室友 / 短租 / 找房 | [card-rental.md](references/card-rental.md) | RENTAL |
-| 行李寄存 / 求寄存 | [card-storage.md](references/card-storage.md) | STORAGE |
-| 回国/来英航班帮带 / 跨国代购 | [card-errand.md](references/card-errand.md) | ERRAND |
-| 代取 / 代排 / 本地代购 / 单次代办 | [card-localrun.md](references/card-localrun.md) | LOCALRUN |
-| 清洁 / 上门做饭 / 维修组装 / 搬家搬运 / 美业上门 | [card-homeservice.md](references/card-homeservice.md) | HOMESERVICE |
-| 约拍 / 陪拍 / 毕业照摄影 | [card-photoshoot.md](references/card-photoshoot.md) | PHOTOSHOOT |
-| 咨询 / 辅导 / 讲题（代写代考一律不接） | [card-consulting.md](references/card-consulting.md) | CONSULTING |
-| 代喂 / 宠物寄养 | [card-petcare.md](references/card-petcare.md) | PETCARE |
-| 找搭子 / 组局 / 语伴 | [card-companion.md](references/card-companion.md) | COMPANION |
-| 拼车 / 接机 / 送机 | [card-carpool.md](references/card-carpool.md) | CARPOOL |
-| 拼团 / 拼单 / 集运拼箱 | [card-groupbuy.md](references/card-groupbuy.md) | GROUPBUY |
-| 招兼职 / 找兼职（持续受雇；单次帮忙归 homeservice/localrun） | [card-job.md](references/card-job.md) | JOB |
+| 卖闲置 / 清东西 / 清仓合集 / 求购某件实物 | [card-goods.md](references/card-goods.md) | 物品交易 |
+| 转票 / 出票 / 收票（演出/球赛/电影/典礼等活动入场票、火车票） | [card-ticket.md](references/card-ticket.md) | 票券转让 |
+| 出借 / 求借（学士服/相机/行李箱/工具，不换主） | [card-lend.md](references/card-lend.md) | 物品租借 |
+| 转租 / 招室友 / 短租 / 找房 | [card-rental.md](references/card-rental.md) | 长租房源 / 短租住宿 |
+| 行李寄存 / 求寄存 | [card-storage.md](references/card-storage.md) | 行李寄存 |
+| 回国/来英航班帮带 / 跨国代购 | [card-errand.md](references/card-errand.md) | 帮带 / 代购 |
+| 代取 / 代排 / 本地代购 / 单次代办 | [card-localrun.md](references/card-localrun.md) | 跑腿代办 |
+| 清洁 / 上门做饭 / 维修组装 / 搬家搬运 / 美业上门 | [card-homeservice.md](references/card-homeservice.md) | 上门家政 / 美业造型 |
+| 约拍 / 陪拍 / 毕业照摄影 | [card-photoshoot.md](references/card-photoshoot.md) | 约拍摄影 |
+| 咨询 / 辅导 / 讲题（代写代考一律不接） | [card-consulting.md](references/card-consulting.md) | 课业辅导 / 升学服务 |
+| 代喂 / 宠物寄养 | [card-petcare.md](references/card-petcare.md) | 宠物服务 |
+| 找搭子 / 组局 / 语伴 | [card-companion.md](references/card-companion.md) | 找搭子 |
+| 拼车 / 接机 / 送机 | [card-carpool.md](references/card-carpool.md) | 拼车 / 专车接送 |
+| 拼团 / 拼单 / 集运拼箱 | [card-groupbuy.md](references/card-groupbuy.md) | 拼团 / 集运物流 |
+| 招兼职 / 找兼职（持续受雇；单次帮忙归 homeservice/localrun） | [card-job.md](references/card-job.md) | 招聘求职 |
 
 > 边界拿不准时看卡里的「分界一句」（如拼车 vs 拼团 vs 搭子、帮带 vs 跑腿、
-> 跑腿 vs 兼职）。**读帖方向以标题/正文语义为准，card/tradeType 仅参考**
+> 跑腿 vs 兼职）。**读帖方向以标题/正文语义为准，场景标签 / tradeType 仅参考**
 > （读侧口径见 marketplace.md §B）。
 
 ## 场景路由
@@ -232,7 +233,7 @@ metadata:
 | **买**：逛集市 / 看看有什么好东西 / 想买 / 帮我看看有没有 xx | [marketplace.md](references/marketplace.md)（逛街章节）**＋ 只要要把搜索结果给主人看，默认同时走 [desk-ui.md](references/desk-ui.md)** 把结果摊成本机网页（支持范围：macOS 上的 Claude Code Desktop / Codex Desktop，环境门在 desk-ui.md 第 0 步；不过就只走 marketplace.md，不提这个功能） |
 | 摊开给我看 / 开个页面 / 我想边看边挑 / 用界面给我看 | [desk-ui.md](references/desk-ui.md)（同上，主人明说时更要开） |
 | **买**：想要个 xx / 帮我盯着 / 有 xx 告诉我 / 发个求购帖 | [marketplace.md](references/marketplace.md)（A2 发求购帖·`listing create --trade-type BUY`；要素以 [card-goods.md](references/card-goods.md) 需求侧为准） |
-| 找室友 / 转租、短租招租 / 回国帮带、找人代购（供需两侧都算） | 先按上面「先判卡」定卡（RENTAL/ERRAND/LOCALRUN/…），再走 [marketplace.md](references/marketplace.md)（§A3 非实物帖公共工序——有房间/可帮带 = 卖帖，找房/求帮带 = 求购帖） |
+| 找室友 / 转租、短租招租 / 回国帮带、找人代购（供需两侧都算） | 先按上面「先判场景」定卡（转租 / 帮带 / 跑腿……），再走 [marketplace.md](references/marketplace.md)（§A3 非实物帖公共工序——有房间/可帮带 = 卖帖，找房/求帮带 = 求购帖） |
 | **卖**：谁在收东西 / 有没有人求购我这件 | `market list --trade-type BUY`，命中后按逛街章节开串 |
 | **卖**：东西还在吗 / 帮我续一下 / 帖子快过期 | [marketplace.md](references/marketplace.md)（「还在」确认·擦亮，`listing confirm`——**只刷新曝光排序，不延长任何截止日**，帖子本来也不会到期自动下架） |
 | 想问卖家 / 想要某件 / 怎么联系卖家 | [marketplace.md](references/marketplace.md)（逛街章节·私密留言串；**转载帖**见 §B3——**不开串**，明确告知无法站内私信，给原帖链接引导去小红书） |
@@ -288,13 +289,13 @@ metadata:
    - **合集帖按分件清单逐行对账**（"1 号微波炉、2 号电视还在吗？"）——已标 ❌已出的行
      不再问；主人说某件出了就只改那一行标 `❌已出`（marketplace.md §A），
      **全部出完才整帖 SOLD**；
-   - 主人给过的时限已过的问要不要下架（帖子不会自动下架，收尾是显式动作）；
+   - 主人给过的时限快到 / 刚过的问要不要改日期（到期服务端会自动下架，按服务器时钟粗判）；
 2. **谁感兴趣**（`message inbox`：别人发给我的留言 / `message pending`：还等我回的串；
-   加商品数据里的 `viewCount`。**串数**要准就用 `message listing-threads <listing_id>`，
-   它才是"这帖下有几条串"）：
-   每件在售报两个数——**浏览**（`viewCount` 字段，"洗衣机被看了 24 次"）和**意向**
-   （留言串数，"3 个人来问过"），其中几条串还等着回、分别聊到哪一步了。
-   ⚠️ `viewCount` 是后端在上的新字段：**返回里有就报，没有就只说串数**，不要编造浏览数；
+   **串数**要准就用 `message listing-threads <listing_id>`，它才是"这帖下有几条串"）：
+   每件在售报**意向**（留言串数，"3 个人来问过"），其中几条串还等着回、分别聊到哪一步了。
+   🔴 **不报浏览量**（返回里的 `viewCount` 一律不念，也不换算成"大概多少人看过"）：
+   那个数会被机器访问刷高，报给主人等于让他按一个假数字判断需求。
+   意向数要有人真开口问才涨，是这里唯一可信的信号。
 3. **调价建议（偶发板块，不是每次都提）**：只有挂了很久还无人问津的
    （pricing.md 阈值起步，结合有没有串、擦亮过几轮，**你自己判断值不值得开口**）
    才主动提一句，引同类在售对照（"台灯挂了 12 天没人问，同类在售 £5–8，你挂 £15——

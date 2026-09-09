@@ -68,12 +68,13 @@ SUMMARY_MAX = 220
 
 # ListingDTO 的公开字段白名单。搜索载荷即便混进别的 agent 上下文字段，也只能有这些
 # 进入详情快照；这与 normalize_search 只挑卡片字段是同一条结构性隐私边界。
+# G5（2026-09-04）：card / category / attributes / itemCondition / flawNote / negotiable /
+# deliveryMethods / meetupAreas / location / commentCount / refreshedAt 随库列删除移出。
 PUBLIC_LISTING_FIELDS = (
-    "listingId", "sellerUserId", "sellerNickname", "sellerVerifiedSchool",
-    "tradeType", "card", "title", "description", "tags", "attributes",
-    "category", "itemCondition", "flawNote", "currency", "price", "negotiable",
-    "deliveryMethods", "meetupAreas", "location", "status", "photos",
-    "commentCount", "viewCount", "refreshedAt", "availableUntil", "createdAt", "updatedAt",
+    "listingId", "posterUserId", "posterNickname", "posterVerifiedSchool",
+    "tradeType", "title", "description", "tags",
+    "currency", "price", "priceUnit", "priceDisplay", "repost",
+    "status", "photos", "viewCount", "availableFrom", "availableUntil", "createdAt", "updatedAt",
 )
 
 
@@ -128,13 +129,13 @@ def a2hmarket(*args: str) -> object:
 
 # ---------------------------------------------------------------- 转载帖判定
 #
-# 🔴 **已知的第二真相源**（实验期接受，正式方案要消掉）。
-#    权威判定在 frontend/src/lib/repost.ts，那份文件开头写着「这是全站唯一一处」。
-#    Python 侧 import 不了 TS，本函数是照它的判据**手抄**的：
-#      主判据 attributes.source == 'xiaohongshu'；兜底扫描述里的小红书链接 / 标题 [转载] 前缀。
-#    链接取法也照抄：优先描述里的完整 URL（带 xsec_token，attributes 里的短链被
-#    128 字上限裁过只作兜底）。抄错的后果是**给一个没人守的帖子开了私信入口**
-#    （0806 拍板「做硬」），所以本包的测试逐条对着 repost.ts 的判据钉了用例。
+# 🔴 主判据是**服务端算好的 `repost` 布尔**（ListingDTO.repost，只在 true 时出现）——
+#    网页端判「这条帖能不能站内联系」用的是同一份规则，两边各判一遍会自相矛盾。
+#    G5（2026-09-04）起 `attributes` 列已删，`attributes.source=xiaohongshu` 那层判据随之退役。
+#    只有拿到的载荷里**根本没有** `repost` 字段（老缓存 / 非集市出口）时才回退到人工判据：
+#    描述里的小红书链接 / 标题 [转载] 前缀（与 frontend/src/lib/repost.ts 的兜底同款）。
+#    链接取法：优先描述里的完整 URL（带 xsec_token 才保证打得开）。抄错的后果是
+#    **给一个没人守的帖子开了私信入口**（0806 拍板「做硬」），本包的测试逐条钉了用例。
 
 # 全角/半角冒号都认（同 repost.ts 的 SOURCE_LINE / XHS_URL）
 _SOURCE_LINE = re.compile(r"原帖联系卖家[：:]\s*(https?://\S+)")
@@ -149,14 +150,14 @@ def repost_source(listing: dict) -> tuple[bool, str | None]:
     if desc_url is None:
         bare = _XHS_URL.search(description)
         desc_url = bare.group(0) if bare else None
-    attributes = listing.get("attributes") or {}
-    if attributes.get("source") == "xiaohongshu":
-        # attributes 里的短链没经正则筛过，进 href 前把 scheme 钉死（红线 8：
-        # 集市数据不许变成 javascript: 之类的可执行链接）
-        attr_url = str(attributes.get("source_url") or "")
-        if not attr_url.startswith(("https://", "http://")):
-            attr_url = ""
-        return True, desc_url or attr_url or None
+    # 描述里的链接进 href 前把 scheme 钉死（红线 8：集市数据不许变成 javascript: 之类的可执行链接）
+    if desc_url and not desc_url.startswith(("https://", "http://")):
+        desc_url = None
+    flag = listing.get("repost")
+    if flag is True:
+        return True, desc_url
+    if flag is False:
+        return False, None
     if desc_url:
         return True, desc_url
     if (listing.get("title") or "").startswith("[转载]"):
@@ -359,11 +360,11 @@ def _preview_listing(item: dict) -> dict:
     seller = item.get("seller") or {}
     return {"listingId": item.get("listingId"), "title": item.get("title"),
             "price": item.get("price"), "currency": item.get("currency"),
-            "card": item.get("card"), "tradeType": item.get("tradeType"),
-            "status": item.get("status"), "itemCondition": item.get("itemCondition"),
-            "location": item.get("location"), "photos": [cover] if cover else [],
-            "sellerNickname": seller.get("nickname"),
-            "sellerVerifiedSchool": seller.get("verifiedSchool")}
+            "priceDisplay": item.get("priceDisplay"), "tags": item.get("tags"),
+            "tradeType": item.get("tradeType"),
+            "status": item.get("status"), "photos": [cover] if cover else [],
+            "posterNickname": seller.get("nickname"),
+            "posterVerifiedSchool": seller.get("verifiedSchool")}
 
 
 def _start_background(name: str, target) -> None:
@@ -651,13 +652,12 @@ def handle_agent_action(session: Session, body: dict, server) -> dict:
     return result
 
 
-# 七项硬校验（marketplace.md，0811 业主拍板）。**缺项走兜底文案，绝不留白** ——
+# 硬校验（marketplace.md，0811 业主拍板）。**缺项走兜底文案，绝不留白** ——
 # 「缺数据写未知是诚实，省略这一栏是让主人猜」。这里做的是把缺失**显式化**，
 # 真正的兜底文案在 deskui_pages.py 的模板里，两边由本包的测试一起钉住。
-# 成色是唯一合法缺席：showCondition=false 的帖型（转租/帮带/跑腿…）不出成色 ——
-# 「转租 · 全新」这类错位比缺席更误导，帖型显隐表在 deskui_pages.CARD_META。
-SEVEN_FIELDS = ("cover", "title", "price", "itemCondition", "location", "seller", "aiNote")
-_DETAIL_COMPLETENESS_FIELDS = {"description", "photos", "sellerUserId", "deliveryMethods"}
+# G5（2026-09-04）：成色 / 位置字段已删（并入正文），七项收成五项；场景徽章来自 tags[0]。
+SEVEN_FIELDS = ("cover", "title", "price", "seller", "aiNote")
+_DETAIL_COMPLETENESS_FIELDS = {"description", "photos", "posterUserId"}
 
 
 def _value(raw: dict, detail: dict, key: str):
@@ -673,7 +673,8 @@ def _normalize_card(raw: dict, detail: dict) -> dict | None:
     cover = raw.get("cover") or (photos[0] if photos else None)
     listing_for_repost = dict(detail)
     listing_for_repost.update({key: raw[key] for key in
-                               ("title", "description", "attributes") if key in raw})
+                               ("title", "description", "repost") if key in raw})
+    tags = _value(raw, detail, "tags")
     return {
         "listingId": str(listing_id),
         "cover": cover if str(cover or "").startswith("https://") else None,
@@ -681,19 +682,21 @@ def _normalize_card(raw: dict, detail: dict) -> dict | None:
         "title": _value(raw, detail, "title"),
         "price": _value(raw, detail, "price"),
         "currency": _value(raw, detail, "currency"),
+        "priceUnit": _value(raw, detail, "priceUnit"),
+        "priceDisplay": _value(raw, detail, "priceDisplay"),
+        # 场景在 tags[0]（G5）；老载荷只带 card 码时模板按镜像表折算
+        "tags": [str(t) for t in tags if t] if isinstance(tags, (list, tuple)) else None,
         "card": _value(raw, detail, "card"),
         "tradeType": _value(raw, detail, "tradeType"),
         "status": _value(raw, detail, "status"),
-        "itemCondition": _value(raw, detail, "itemCondition"),
-        "location": _value(raw, detail, "location"),
         "distanceNote": raw.get("distanceNote"),
         # 无图卡用描述首段补位（2026-08 设计定稿 3a）；有图卡模板不读这个键
         "description": _value(raw, detail, "description"),
         "seller": {
             "verifiedSchool": (seller.get("verifiedSchool")
-                               or _value(raw, detail, "sellerVerifiedSchool")),
+                               or _value(raw, detail, "posterVerifiedSchool")),
             "tag": seller.get("tag"),
-            "nickname": seller.get("nickname") or _value(raw, detail, "sellerNickname"),
+            "nickname": seller.get("nickname") or _value(raw, detail, "posterNickname"),
             "isRepost": bool(seller.get("isRepost") or is_repost(listing_for_repost)),
         },
         "aiNote": raw.get("aiNote"),
@@ -708,15 +711,15 @@ def _normalize_detail_snapshot(raw: dict, detail: dict, card: dict) -> dict:
     source.update({key: raw[key] for key in PUBLIC_LISTING_FIELDS if key in raw})
     listing = {key: source.get(key) for key in PUBLIC_LISTING_FIELDS if key in source}
     listing.update({key: card.get(key) for key in
-                    ("listingId", "title", "price", "currency", "card", "tradeType",
-                     "status", "itemCondition", "location") if card.get(key) is not None})
+                    ("listingId", "title", "price", "currency", "priceUnit", "priceDisplay",
+                     "tags", "tradeType", "status") if card.get(key) is not None})
     if not listing.get("photos") and card.get("cover"):
         listing["photos"] = [card["cover"]]
     seller = card.get("seller") or {}
-    if not listing.get("sellerNickname") and seller.get("nickname"):
-        listing["sellerNickname"] = seller["nickname"]
-    if not listing.get("sellerVerifiedSchool") and seller.get("verifiedSchool"):
-        listing["sellerVerifiedSchool"] = seller["verifiedSchool"]
+    if not listing.get("posterNickname") and seller.get("nickname"):
+        listing["posterNickname"] = seller["nickname"]
+    if not listing.get("posterVerifiedSchool") and seller.get("verifiedSchool"):
+        listing["posterVerifiedSchool"] = seller["verifiedSchool"]
     complete_source = detail if detail else raw
     complete = _DETAIL_COMPLETENESS_FIELDS.issubset(complete_source.keys())
     return {"listing": listing, "complete": complete,
@@ -753,8 +756,8 @@ def normalize_search(payload: dict) -> dict:
 
     🔴 只挑模板认识的键 —— 这就是「human 视图是 agent 载荷的真子集」的实现：
     agent 就算把私有定价策略塞进来，也进不了页面。
-    card / tradeType / status 直接透传服务端原值：徽章文案、价格修饰、状态标签
-    全部由模板按 CARD_META 计算，agent 不需要也不允许替页面翻译这些。
+    tags / tradeType / status / priceDisplay 直接透传服务端原值：场景徽章（tags[0]）、
+    价格文本、状态标签全部由模板算，agent 不需要也不允许替页面翻译这些。
     """
     return normalize_search_bundle(payload)[0]
 

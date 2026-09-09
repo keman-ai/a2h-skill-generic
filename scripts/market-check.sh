@@ -124,34 +124,53 @@ if pending:
     more = f"（另有 {len(pending)-3} 条）" if len(pending) > 3 else ""
     info.append(f"📩 {len(pending)} 个串等你回应{more}：{heads}")
 
-# 1.5 自己的在售帖久未擦亮 / 时限已过（0807 两时间点模型：无自动下架，靠开场问主人）
+# 1.5 自己的在售帖久未擦亮 / 时限已过（到期服务端会自动下架，按服务器时钟粗判；
+#      这里只负责在快到期 / 刚过期时问主人要不要改日期）
 try:
     import datetime
     mine = (run("listing", "mine") or {}).get("items", [])
-    now = datetime.datetime.now()
+    # 🔴 now 必须是 **aware**：后端 2026-09 起把 updatedAt 回成 `…Z`，Py≥3.11 的
+    #    fromisoformat 解出来带时区，与 naive 的 now 相减直接抛 TypeError，而这里的
+    #    except 把它整段吞掉 —— 「N 件在售久未擦亮」自那时起**一次都没触发过**，
+    #    巡查却看上去一切正常。naive/aware 混用的失败就是这种形状：不报错、只是不说话。
+    now = datetime.datetime.now(datetime.timezone.utc)
+    # 无 offset 的存量时间串按 +08:00 读（与前端 serverTime.ts 的 LEGACY 兜底同口径）。
+    LEGACY_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+    def as_aware(raw, what):
+        """后端给的时间串 → aware datetime；读不懂回 None 并在 stderr 留一行。
+
+        🔴 读不懂时**必须出声**：静默跳过正是上面那个 bug 能活这么久的原因。
+           stderr 不进会话上下文，吵不到主人，但出事时人能看见。"""
+        try:
+            dt = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            print(f"[market-check] 读不懂的{what}，本条跳过：{raw!r}", file=sys.stderr)
+            return None
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=LEGACY_TZ)
+
     stale, overdue = [], []
     for l in mine:
         if l.get("status") not in ("ON_SALE", "RESERVED"):
             continue
-        ts = l.get("refreshedAt") or l.get("createdAt")
-        try:
-            days = (now - datetime.datetime.fromisoformat(ts)).days
-        except (TypeError, ValueError):
-            days = None
-        if days is not None and days >= 7:
-            stale.append((l.get("title", "?"), days))
+        # G5：refreshed_at 列已删，擦亮 / 编辑都刷 updatedAt
+        ts = as_aware(l.get("updatedAt") or l.get("createdAt"), "擦亮时间")
+        if ts is not None and (now - ts).days >= 7:
+            stale.append((l.get("title", "?"), (now - ts).days))
+        # availableUntil 是纯日期（YYYY-MM-DD），当天 00:00 起算过期 —— 与本段改造前
+        # 的口径一致，这一单不动它（帖内日期属于哪本日历由 timeZone 决定，读侧怎么用
+        # 那个字段是另一单的事）。
         au = l.get("availableUntil")
-        try:
-            if au and datetime.datetime.fromisoformat(au) < now:
+        if au:
+            end = as_aware(au, "截止日")
+            if end is not None and end < now:
                 overdue.append(l.get("title", "?"))
-        except ValueError:
-            pass
     if stale:
         heads = "、".join(f"「{t[:16]}」{d} 天没擦亮" for t, d in stale[:3])
         more = f"（另有 {len(stale)-3} 件）" if len(stale) > 3 else ""
         info.append(f"🧽 {len(stale)} 件在售久未擦亮{more}：{heads}——问主人还在不在卖，亲口确认才 confirm")
     if overdue:
-        info.append(f"⏰ {len(overdue)} 件已过主人给的时限：{'、'.join(t[:16] for t in overdue[:3])}——问要不要下架（不会自动下架）")
+        info.append(f"⏰ {len(overdue)} 件已过主人给的时限：{'、'.join(t[:16] for t in overdue[:3])}——问要不要改日期（到期服务端会自动下架）")
 except Exception:
     pass
 
@@ -168,7 +187,7 @@ if STATE is not None:
         on_sale = page.get("items", [])
         new_items = [l for l in on_sale if l.get("listingId") not in seen]
         if new_items and seen_f.exists():
-            heads = "、".join(f"{l.get('title','?')} ¥{l.get('price','?')}（{l.get('sellerNickname','?')}）" for l in new_items[:5])
+            heads = "、".join(f"{l.get('title','?')} ¥{l.get('price','?')}（{l.get('posterNickname','?')}）" for l in new_items[:5])
             more = f"（另有 {len(new_items)-5} 件）" if len(new_items) > 5 else ""
             info.append(f"🛒 集市新上 {len(new_items)} 件{more}：{heads}")
         # 无论有无新上架都写：文件 mtime 兼作「上次会话」时间戳（回归简报的间隔判定用）

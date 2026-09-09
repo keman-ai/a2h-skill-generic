@@ -16,15 +16,13 @@ CSS 与页面 JS 住在 `assets/`（0.38.0 载荷闸开的口，仅该目录允�
 
 1. **一切来自集市的文本都当数据**（红线 8）：只经 `esc()` 进文本节点或属性，
    永不拼进 `<script>`、永不当 HTML。图片只接受 `https://`。
-2. **七项硬校验缺项走兜底文案，绝不留白**（marketplace.md）：「缺数据写未知是诚实，
+2. **硬校验缺项走兜底文案，绝不留白**（marketplace.md）：「缺数据写未知是诚实，
    省略这一栏是让主人猜」。兜底在模板里，不指望 agent 记得填。
-   唯一的合法缺席：`showCondition=false` 的帖型不出成色（「转租 · 全新」这类错位
-   正是帖型体系要治的，见 CARD_META）。
+   G5（2026-09-04）起成色 / 位置没有字段（并入正文），这两栏整体退役，不再出兜底。
 
 样式对齐 Web 端移动档（tokens 快照 + 结构对照见 assets/deskui.css 头注）。
-CARD_META / 价格呈现 / 状态文案是对 frontend/src/lib/{cardMeta,listingPrice,listingCopy}.ts
-的移植 —— **防漂移闸**（kernel/tests/test-deskui.py::CardMetaMirrorsFrontend）直接解析
-TS 源码逐值比对，改任何一边另一边必须跟。
+场景徽章念 `tags[0]`（服务端统一判定的 25 场景）；价格先念服务端拼好的 `priceDisplay`；
+状态文案是对 frontend/src/lib/listingCopy.ts 的移植。
 """
 
 from __future__ import annotations
@@ -32,41 +30,41 @@ from __future__ import annotations
 import hashlib
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # 静态资源在 assets/：产物里 scripts/ 与 assets/ 并排，源码树里 kernel/scripts/ 与
 # kernel/assets/ 并排 —— 同一个表达式两种布局都对。只读不写（零落盘不变量）。
 _ASSETS = Path(__file__).resolve().parents[1] / "assets"
 
-# ---------------------------------------------------------------- 帖型呈现（移植自前端）
+# ---------------------------------------------------------------- 帖型呈现
 
-# 🔴 移植自 frontend/src/lib/cardMeta.ts 的 CARD_META（全站唯一真相源在那边）。
-#    16 帖型 × (徽章 sell/buy、成色显隐、价格修饰、浓淡)。防漂移闸逐值对照 TS 源码。
-#    翻转判定纪律沿用：只写 == "BUY"，不写 != "SELL"（tradeType 可选，缺列按 SELL）。
-CARD_META = {
-    "GOODS":       {"sell": "出闲置", "buy": "求购",   "show_condition": True,  "price": "budget-aware", "accent": "quiet"},
-    "TICKET":      {"sell": "转票",   "buy": "收票",   "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "LEND":        {"sell": "出借",   "buy": "求租借", "show_condition": True,  "price": "from",         "accent": "strong"},
-    "RENTAL":      {"sell": "转租",   "buy": "找房",   "show_condition": False, "price": "periodic",     "accent": "strong"},
-    "STORAGE":     {"sell": "寄存",   "buy": "求寄存", "show_condition": False, "price": "from",         "accent": "strong"},
-    "ERRAND":      {"sell": "帮带",   "buy": "求帮带", "show_condition": False, "price": "from",         "accent": "strong"},
-    "LOCALRUN":    {"sell": "跑腿",   "buy": "求代办", "show_condition": False, "price": "from",         "accent": "strong"},
-    "HOMESERVICE": {"sell": "上门服务", "buy": "求上门", "show_condition": False, "price": "from",       "accent": "strong"},
-    "PHOTOSHOOT":  {"sell": "约拍",   "buy": "求约拍", "show_condition": False, "price": "from",         "accent": "strong"},
-    "CONSULTING":  {"sell": "辅导",   "buy": "求辅导", "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "PETCARE":     {"sell": "宠物照看", "buy": "求代喂", "show_condition": False, "price": "from",       "accent": "strong"},
-    "COMPANION":   {"sell": "找搭子", "buy": "找搭子", "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "CARPOOL":     {"sell": "拼车",   "buy": "求拼车", "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "GROUPBUY":    {"sell": "拼团",   "buy": "求拼",   "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "JOB":         {"sell": "招人",   "buy": "求职",   "show_condition": False, "price": "fixed",        "accent": "strong"},
-    "OTHER":       {"sell": "其他",   "buy": "其他",   "show_condition": True,  "price": "budget-aware", "accent": "quiet"},
+# G5（2026-09-04）：`card` 列已删，16 帖型的 CARD_META 随之退役。帖子的场景在
+# `tags[0]`（服务端统一判定的 25 场景中文名，如「物品交易」「长租房源」），
+# 徽章直接念它；成色 / 地点 / 交付方式已并入正文，页面不再有这些栏。
+# 翻转判定纪律沿用：只写 == "BUY"，不写 != "SELL"（tradeType 可选，缺列按 SELL）。
+
+# 旧帖型码 → 场景名（服务端 cardAsTag 同一张表的镜像；存量/老缓存里可能还带 card 码）。
+LEGACY_CARD_SCENE = {
+    "GOODS": "物品交易", "TICKET": "票券转让", "LEND": "物品租借", "RENTAL": "长租房源",
+    "STORAGE": "行李寄存", "ERRAND": "帮带", "LOCALRUN": "跑腿代办", "HOMESERVICE": "上门家政",
+    "PHOTOSHOOT": "约拍摄影", "CONSULTING": "课业辅导", "PETCARE": "宠物服务",
+    "COMPANION": "找搭子", "CARPOOL": "拼车", "GROUPBUY": "拼团", "JOB": "招聘求职",
 }
 
+# 求购侧无场景时的方向兜底徽章（与 Web 端 listingCopy 的方向文案同口径）。
+DIRECTION_LABEL = {"SELL": "出", "BUY": "求", "PEER": "搭伴"}
 
-def card_meta_of(listing: dict) -> dict:
-    """白名单式回落 GOODS（同 cardTypeOf）：老数据/未知值按改版前现状呈现。"""
-    return CARD_META.get(listing.get("card") or "", CARD_META["GOODS"])
+
+def scene_of(listing: dict) -> str | None:
+    """帖子的场景名：tags[0]；老数据只带 card 码时按镜像表折算；都没有为 None。"""
+    tags = listing.get("tags")
+    if isinstance(tags, (list, tuple)) and tags and isinstance(tags[0], str) and tags[0].strip():
+        return tags[0].strip()
+    legacy = listing.get("card")
+    if isinstance(legacy, str) and legacy.strip():
+        return LEGACY_CARD_SCENE.get(legacy.strip().upper())
+    return None
 
 
 def is_wanted(listing: dict) -> bool:
@@ -81,19 +79,15 @@ BUY_STATUS_LABEL = {"RESERVED": "已锁定", "SOLD": "已收到", "GIFTED": "已
 # 移植自 frontend/src/lib/listingPrice.ts 的 CURRENCY_SYMBOL。表外币种显示「代码+空格」。
 CURRENCY_SYMBOL = {"CNY": "¥", "GBP": "£", "USD": "$", "EUR": "€", "HKD": "HK$", "SGD": "S$"}
 
-# 移植自 frontend/src/api/types.ts 的 CONDITION_LABEL。表外值原样显示（老数据兜底）。
-CONDITION_LABEL = {"NEW": "全新", "LIKE_NEW": "几乎全新", "LIGHT_WEAR": "轻微使用痕迹",
-                   "VISIBLE_WEAR": "明显使用痕迹", "FLAWED": "能用有瑕疵"}
+# 计价单位后缀（G5：price_unit 自由文本，也兼容存量枚举名）。TOTAL / 总价不加后缀。
+PRICE_UNIT_SUFFIX = {"PER_WEEK": "周", "PER_MONTH": "月", "PER_NIGHT": "晚", "PER_DAY": "天",
+                     "PER_HOUR": "小时", "PER_ITEM": "件", "PER_PERSON": "人", "TOTAL": ""}
 
 # 移植自 frontend/src/pages/ListingDetail.tsx 的 CONTACT_TYPE_LABEL（防漂移闸对照 TS 源码）。
 # 开放小写串，表外类型原样展示；邮箱在最前由服务端排序保证，模板照序渲染即可。
 CONTACT_TYPE_LABEL = {"email": "邮箱", "wechat": "微信", "wechat_qr": "微信二维码",
                       "xiaohongshu": "小红书", "whatsapp": "WhatsApp",
                       "instagram": "Instagram", "phone": "电话"}
-
-
-def condition_label(value) -> str:
-    return CONDITION_LABEL.get(value, str(value)) if value else ""
 
 
 def _amount(price) -> str:
@@ -104,13 +98,17 @@ def _amount(price) -> str:
 
 
 def price_text(listing: dict) -> str:
-    """移植自 listingPrice.ts::listingPriceText。
+    """价格文本。
 
-    🔴 方向翻转（预算/面议/免费送）与卡型修饰（/月、起）两层，判定原样照搬：
+    🔴 **先念服务端拼好的 `priceDisplay`**（G5：币种 + 金额 + 方向 + price_unit 由服务端
+    组装层唯一真相源拼出「£375/周」「预算 £50」「免费送」），本地只在它缺席时兜底：
     - price 空 = 面议 / 预算面议（别和 0 混：0 在卖帖是免费送）
     - BUY 的 0 绝不显示成免费送（预算 0 只能是「预算面议」）
-    - from 修饰只加在供给侧（求购预算是上限，「预算 £5 起」自相矛盾）
+    - 有 priceUnit 才加「/周」这类后缀；没有就不猜周期（转租按周挂的比按月多五倍）
     """
+    display = listing.get("priceDisplay")
+    if isinstance(display, str) and display.strip():
+        return display.strip()
     wanted = is_wanted(listing)
     price = listing.get("price")
     if price is None:
@@ -120,25 +118,30 @@ def price_text(listing: dict) -> str:
     currency = listing.get("currency")
     symbol = CURRENCY_SYMBOL.get(currency, f"{currency} ") if currency else "¥"
     prefix = f"预算 {symbol}" if wanted else symbol
-    presentation = card_meta_of(listing)["price"]
-    if presentation == "periodic":
-        return f"{prefix}{_amount(price)}/月"
-    if presentation == "from":
-        return f"{prefix}{_amount(price)}" if wanted else f"{prefix}{_amount(price)}起"
-    return f"{prefix}{_amount(price)}"
+    unit = listing.get("priceUnit")
+    suffix = ""
+    if isinstance(unit, str) and unit.strip():
+        raw = unit.strip()
+        suffix = PRICE_UNIT_SUFFIX.get(raw.upper(), raw)
+        suffix = f"/{suffix}" if suffix else ""
+    return f"{prefix}{_amount(price)}{suffix}"
 
 
 def card_badges(listing: dict) -> str:
-    """帖型徽章 + （非在售时）状态徽章。**一律不压图**（2026-08 设计定稿），
+    """场景徽章 + （非在售时）状态徽章。**一律不压图**（2026-08 设计定稿），
     统一放标题上方，只剩 flat 一档底色。
 
-    tone 两维取并（同 ListingCard 的 CardTag）：求购 ∨ accent=strong → wanted 档
-    （紫，文字用 --yx-tag-strong 保对比度）；否则 plain 档。
+    徽章文案 = 场景名（tags[0]）；没有场景时退回方向词（出 / 求 / 搭伴）。
+    tone：求购 → wanted 档（紫，文字用 --yx-tag-strong 保对比度）；否则 plain 档。
     """
-    meta = card_meta_of(listing)
     wanted = is_wanted(listing)
-    label = meta["buy"] if wanted else meta["sell"]
-    tone = "wanted" if (wanted or meta["accent"] == "strong") else "plain"
+    scene = scene_of(listing)
+    direction = DIRECTION_LABEL.get(listing.get("tradeType") or "SELL", "")
+    if scene:
+        label = f"{direction}·{scene}" if wanted and direction else scene
+    else:
+        label = direction or "帖子"
+    tone = "wanted" if wanted else "plain"
     badges = [f'<span class="badge badge-{tone}">{esc(label)}</span>']
     status = listing.get("status")
     if status and status != "ON_SALE":
@@ -156,8 +159,6 @@ FALLBACK = {
     "cover_failed": "图没拿到，点链接看",
     "title": "（无标题）",
     "price": "面议",
-    "condition": "成色未知",
-    "location": "未写位置",
     "seller": "卖家未留背景",
     "note": "（这件我还没来得及看）",
     "description": "（这帖没写描述）",
@@ -187,15 +188,35 @@ SCHOLAR_SVG = ('<svg viewBox="0 0 24 24" width="11" height="11" fill="none" '
                '<path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>')
 
 
+#: 服务端历史裸串的隐含时区。与 youxian-post `ServerTime.SERVER_ZONE`、
+#: frontend `serverTime.ts` 的 LEGACY_SERVER_OFFSET 同口径。
+#: 2026-09-03 起服务端出参带 `Z`，这条兜底只为还没滚完的实例与缓存的旧响应。
+_LEGACY_SERVER_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
+def parse_server_time(iso: str | None) -> datetime | None:
+    """服务端时间串 → **带时区**的 datetime；解析不了给 None。
+
+    🔴 永远不返回 naive datetime。原来的写法在裸串分支上用 `datetime.now()`（本机时区）
+    去减一个 naive 的服务端时间，等于「拿伦敦的墙上时间减北京的墙上时间」——
+    desk UI 跑在**用户自己的机器**上，用户在英国就偏 7～8 小时，
+    表现是 8 小时内擦亮过的帖子全都念成「刚刚」。
+    """
+    if not iso:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(iso).strip().replace(" ", "T").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=_LEGACY_SERVER_TZ) if parsed.tzinfo is None else parsed
+
+
 def relative_time_note(iso: str | None) -> str:
     """「x 前」的近似口径（发帖人卡的确认在售副行用）。解析不了就空着不猜。"""
-    if not iso:
+    then = parse_server_time(iso)
+    if then is None:
         return ""
-    try:
-        then = datetime.fromisoformat(str(iso).replace(" ", "T").replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    now = datetime.now(then.tzinfo) if then.tzinfo else datetime.now()
+    now = datetime.now(timezone.utc)
     seconds = (now - then).total_seconds()
     if seconds < 60:
         return "刚刚"
@@ -258,16 +279,12 @@ def search_view(payload: dict) -> str:
         parts.append(f'<section class="sumcard"><b>AI 搜索摘要</b>'
                      f'<p>{esc(payload["summary"])}</p></section>')
     for item in items:
-        meta = card_meta_of(item)
         open_act = act({"type": "open_listing", "listingId": item["listingId"]})
-        # meta 行：✓校名 · 成色(按帖型显隐) · 位置 · 远近 —— 缺项写「未知/未写」，
-        # 成色是唯一合法缺席（showCondition=false 的帖型，错位比缺席更误导）
+        # meta 行：✓校名 · 远近 · 其余标签 —— G5 起成色/位置没有字段（并入正文），
+        # 页面不再为它们出「未知/未写」兜底；远近由 agent 从正文/档案里判给 distanceNote
         verified_part, seller_foot = _seller_line(item)
-        meta_parts = [verified_part]
-        if meta["show_condition"]:
-            meta_parts.append(condition_label(item.get("itemCondition")) or FALLBACK["condition"])
-        meta_parts.append(item.get("location") or FALLBACK["location"])
-        meta_parts.append(item.get("distanceNote") or "")
+        meta_parts = [verified_part, item.get("distanceNote") or ""]
+        meta_parts.extend(str(t) for t in (item.get("tags") or [])[1:4] if t)
         meta_line = " · ".join(esc(part) for part in meta_parts if part)
         foot = (f'<div class="scard-foot">'
                 f'<span class="scard-seller">{avatar(None, seller_foot, "av-18")}'
@@ -330,31 +347,17 @@ def listing_view(payload: dict) -> str:
     photo_note = ('<p class="photo-note">参考图 · TA 想要的大概是这样，不是实物</p>'
                   if is_wanted(listing) and photos else "")
 
-    meta = card_meta_of(listing)
-    chips = []
-    if listing.get("category"):
-        chips.append(f'<span class="chip">{esc(listing["category"])}</span>')
-    if meta["show_condition"]:
-        prefix = "最低接受 " if is_wanted(listing) else ""
-        chips.append(f'<span class="chip">{prefix}{esc(condition_label(listing.get("itemCondition")) or FALLBACK["condition"])}</span>')
-    chips.append(f'<span class="chip">{esc(listing.get("location") or FALLBACK["location"])}</span>')
-    for method in (listing.get("deliveryMethods") or []):
-        label = {"PICKUP": "自提", "SHIPPING": "邮寄", "LOCAL_DELIVERY": "同城送"}.get(method)
-        if label:
-            chips.append(f'<span class="chip">{esc(label)}</span>')
+    # chips = 场景之外的标签（G5：品类/成色/地点/交付都没有字段了，成色瑕疵地点在正文里）
+    chips = [f'<span class="chip">{esc(str(t))}</span>'
+             for t in (listing.get("tags") or [])[1:] if t]
 
-    # 主信息卡（设计定稿 3b 信息三段式之一）：徽章 → 标题 → 价格行（「可议价」从
-    # chips 移进来同行）→ chips → 分隔线下并入瑕疵说明（无 flawNote 整段不渲染）
-    negotiable = ('<span class="dnegotiable">可议价</span>'
-                  if listing.get("negotiable") else "")
-    flaw = (f'<div class="dflaw"><b>瑕疵说明</b><span>{esc(listing["flawNote"])}</span></div>'
-            if listing.get("flawNote") else "")
+    # 主信息卡（设计定稿 3b 信息三段式之一）：徽章 → 标题 → 价格行 → 标签 chips
     main_card = (f'<section class="dcard">'
                  f'<div class="scard-badges">{card_badges(listing)}</div>'
                  f'<h1 class="dtitle">{esc(listing.get("title") or FALLBACK["title"])}</h1>'
-                 f'<div class="dprice-row"><span class="dprice">{esc(price_text(listing))}</span>'
-                 f'{negotiable}</div>'
-                 f'<div class="dchips">{"".join(chips)}</div>{flaw}</section>')
+                 f'<div class="dprice-row"><span class="dprice">{esc(price_text(listing))}</span></div>'
+                 + (f'<div class="dchips">{"".join(chips)}</div>' if chips else "")
+                 + '</section>')
 
     # 转载 Alert 文案对齐 Web（ListingDetail.tsx）：有链接引导去原帖，没链接给搜索指引
     repost_alert = ""
@@ -364,21 +367,16 @@ def listing_view(payload: dict) -> str:
         repost_alert = (f'<div class="alert"><b>转载自小红书</b>'
                         f'这条帖子是从小红书转载的，发帖账号无法站内私信。{guide}</div>')
 
-    # 发帖人卡：副行「x 前确认在售」只在卖家真确认过时出现（refreshedAt 明显晚于
-    # createdAt 才是确认信号——Web 端 0807 两时间点模型的同款判定，别拿发布时间冒充）
-    verified = listing.get("sellerVerifiedSchool")
-    seller_name = listing.get("sellerNickname") or FALLBACK["seller"]
-    confirmed = ""
-    refreshed, created = listing.get("refreshedAt"), listing.get("createdAt")
-    if refreshed and created and str(refreshed) > str(created):
-        note = relative_time_note(refreshed)
-        confirmed = f'<span class="seller-sub">{esc(note)}确认在售</span>' if note else ""
+    # 发帖人卡。G5 起「x 前确认在售」副行退役：refreshed_at 列已删，updated_at 改描述改价
+    # 也会动，拿它冒充「确认在售」信号是错的（擦亮机制本身还没立住，0822 拍板不出站）。
+    verified = listing.get("posterVerifiedSchool")
+    seller_name = listing.get("posterNickname") or FALLBACK["seller"]
     school = (f'<span class="verify">{SCHOLAR_SVG}<span>{esc(verified)}</span></span>'
               if verified else "")
     seller_card = (f'<section class="dcard dseller">'
-                   f'{avatar(listing.get("sellerUserId"), seller_name, "av-44")}'
+                   f'{avatar(listing.get("posterUserId"), seller_name, "av-44")}'
                    f'<span class="seller-body"><span class="seller-name">{esc(seller_name)}</span>'
-                   f'{confirmed}</span>{school}</section>')
+                   f'</span>{school}</section>')
 
     # CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx，null = 这一态没有 CTA）：
     # ① 自己的帖子 → 无 CTA；② 转载有链接 → 外跳原帖；③ 转载没链接 → 无 CTA

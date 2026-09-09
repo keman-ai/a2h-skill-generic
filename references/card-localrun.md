@@ -41,6 +41,9 @@
   该时点一过按硬时间窗口径直接建议下架；
 - `--available-until` 填事项截止日；持续可约类留空。
 
+> ⏱ **帖内日期属于哪本日历**：发帖时按内容推出 IANA 时区一并给 `--time-zone`（伦敦侧 `Europe/London`，国内侧 `Asia/Shanghai`），**推不出就不传**。完整口径在 skill 内核 `references/time-window.md`，本卡不复述。
+
+
 ## 5. 匹配主键与标签
 
 **区域 × 事项**（"UCL 附近代取""伦敦 boots 代购"）。
