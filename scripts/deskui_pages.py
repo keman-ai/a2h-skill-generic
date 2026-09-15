@@ -21,7 +21,7 @@ CSS 与页面 JS 住在 `assets/`（0.38.0 载荷闸开的口，仅该目录允�
    G5（2026-09-04）起成色 / 位置没有字段（并入正文），这两栏整体退役，不再出兜底。
 
 样式对齐 Web 端移动档（tokens 快照 + 结构对照见 assets/deskui.css 头注）。
-场景徽章念 `tags[0]`（服务端统一判定的 25 场景）；价格先念服务端拼好的 `priceDisplay`；
+场景徽章念 `tags[0]`（服务端统一判定的 24 个场景）；价格先念服务端拼好的 `priceDisplay`；
 状态文案是对 frontend/src/lib/listingCopy.ts 的移植。
 """
 
@@ -40,7 +40,7 @@ _ASSETS = Path(__file__).resolve().parents[1] / "assets"
 # ---------------------------------------------------------------- 帖型呈现
 
 # G5（2026-09-04）：`card` 列已删，16 帖型的 CARD_META 随之退役。帖子的场景在
-# `tags[0]`（服务端统一判定的 25 场景中文名，如「物品交易」「长租房源」），
+# `tags[0]`（服务端统一判定的 24 个场景中文名，如「物品交易」「长租房源」），
 # 徽章直接念它；成色 / 地点 / 交付方式已并入正文，页面不再有这些栏。
 # 翻转判定纪律沿用：只写 == "BUY"，不写 != "SELL"（tradeType 可选，缺列按 SELL）。
 
@@ -49,7 +49,7 @@ LEGACY_CARD_SCENE = {
     "GOODS": "物品交易", "TICKET": "票券转让", "LEND": "物品租借", "RENTAL": "长租房源",
     "STORAGE": "行李寄存", "ERRAND": "帮带", "LOCALRUN": "跑腿代办", "HOMESERVICE": "上门家政",
     "PHOTOSHOOT": "约拍摄影", "CONSULTING": "课业辅导", "PETCARE": "宠物服务",
-    "COMPANION": "找搭子", "CARPOOL": "拼车", "GROUPBUY": "拼团", "JOB": "招聘求职",
+    "COMPANION": "找搭子", "CARPOOL": "拼车", "GROUPBUY": "物品交易", "JOB": "招聘求职",
 }
 
 # 求购侧无场景时的方向兜底徽章（与 Web 端 listingCopy 的方向文案同口径）。

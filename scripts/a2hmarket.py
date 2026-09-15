@@ -1147,17 +1147,46 @@ def _profile_login_hint(token: str) -> dict:
 
 # ---------------------------------------------------------------- market / listing
 
-def _tags_arg(raw: list[str] | None) -> list[str] | None:
-    """--tags（标签过滤）归一化：去空白、丢空值，全没有就不带这个参数。
+# 服务端 TagAliases 认的旧英文码（大小写敏感，只认大写）。镜像这张表只为一件事：
+# 用户/模型写成小写的 `rental` 时补成大写，别让它变成一个查不到的标签。
+LEGACY_TAG_CODES = frozenset({
+    "DIGITAL", "APPLIANCE", "BOOK", "BABY", "CLOTHING", "HOME", "SPORTS",
+    "GOODS", "TICKET", "LEND", "RENTAL", "STORAGE", "ERRAND", "LOCALRUN", "HOMESERVICE",
+    "PHOTOSHOOT", "CONSULTING", "PETCARE", "COMPANION", "CARPOOL", "GROUPBUY", "JOB", "OTHER",
+})
 
-    2026-09-05：服务端把 card / category / tag 三个过滤参数合并成 tags（每个都要命中）——
-    G5 之后那三列都已删除、折叠进帖子的 `tags`，三条路本来就落在同一个过滤上。
-    值是标签原文：`tags[0]` 是场景中文名（如「物品交易」「长租房源」），其余是描述性标签。
-    旧的大写帖型码（RENTAL/ERRAND…）服务端仍会映射到对应场景，所以小写笔误照旧转大写；
-    中文不受影响。刻意**不做**客户端白名单 —— 合法值由服务端定，客户端硬校验会把新增场景拦死。"""
+# 场景标签（帖子 tags[0]），与服务端 tag-vocabulary.yaml 同一份 24 个；
+# 「其他」是查询用的特殊值 = 一个场景标签都没有的帖。
+SCENE_TAGS = ("物品交易", "物品租借", "长租房源", "短租住宿", "拼车", "专车接送", "旅游同行",
+              "帮带", "代购", "集运物流", "行李寄存", "搬家搬运", "票券转让", "上门家政",
+              "美业造型", "约拍摄影", "宠物服务", "跑腿代办", "手续代办", "课业辅导",
+              "升学服务", "招聘求职", "找搭子", "交友征友")
+
+
+def _tags_arg(raw: list[str] | None) -> list[str] | None:
+    """--tags / --exclude-tags 归一化：去空白、丢空值，全没有就不带这个参数。
+
+    值是标签原文，**大小写原样发**：标签是精确匹配，库里 `ikea` 与 `IKEA` 是两个不同的标签
+    （09-15 prod：17 条 / 29 条），一律转大写会把小写那批整个漏掉。
+    只有旧英文帖型码（RENTAL/ERRAND…）写成小写时补成大写，服务端只认大写。
+    刻意**不做**客户端白名单 —— 合法值由服务端定，客户端硬校验会把新增场景拦死。"""
     if not raw:
         return None
-    out = [v.strip().upper() if v.strip().isascii() else v.strip() for v in raw if v and v.strip()]
+    out = []
+    for value in raw:
+        for part in (value or "").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            out.append(part.upper() if part.upper() in LEGACY_TAG_CODES else part)
+    return out or None
+
+
+def _list_arg(raw: list[str] | None) -> list[str] | None:
+    """可重复 / 逗号分隔的列表参数统一成列表；空就不带。"""
+    if not raw:
+        return None
+    out = [part.strip() for value in raw for part in (value or "").split(",") if part.strip()]
     return out or None
 
 
@@ -1231,8 +1260,17 @@ def cmd_market_list(args):
        excludeSelf 悄悄失效，主人会看到自己的商品被推荐给自己而不知道为什么。
     """
     # 2026-09-05：card / category / tag 三个过滤参数合并成 tags（每个都要命中）。
+    # 2026-09-15：补齐与客服 Agent 同一套检索能力（服务端 MarketSearchParams，登录态与公开口一致）。
+    #   取值校验交给服务端：它会点名参数和改法（PARAM_INVALID），客户端重复一遍只会和服务端漂移。
     params = {"keyword": args.keyword,
-              "tradeType": args.trade_type, "tags": _tags_arg(getattr(args, "tags", None)),
+              "tradeType": args.trade_type, "tags": _tags_arg(args.tags),
+              "excludeKeyword": args.exclude_keyword, "excludeTags": _tags_arg(args.exclude_tags),
+              "postType": args.post_type, "poster": args.poster,
+              "priceMin": args.price_min, "priceMax": args.price_max, "currency": args.currency,
+              "createdFrom": args.created_from, "createdTo": args.created_to,
+              "updatedFrom": args.updated_from, "updatedTo": args.updated_to,
+              "listingIds": _list_arg(args.listing_ids), "keywordIn": _list_arg(args.keyword_in),
+              "sort": _list_arg(args.sort),
               "page": args.page, "size": args.size}
     if not current_token():
         emit_ok(_project_market(_market_list_public(params)), untrusted=True)
@@ -2163,37 +2201,60 @@ def build_parser() -> argparse.ArgumentParser:
 
     market = sub.add_parser("market").add_subparsers(dest="sub", required=True)
     ml = market.add_parser("list")
-    # 🔴 09-03 补：这个参数此前**一行 help 都没有**，而它是整个检索里最容易用错的一个。
-    #    口径与 skill §B「怎么搜才搜得到」同源，数字都是 09-03 在 prod 实测的。
+    # 🔴 参数口径与客服 Agent 的 searchListings 工具说明同源（服务端同一个索引、同一套编译）；
+    #    怎么组合用见 references/marketplace.md「怎么搜才搜得到」。
     ml.add_argument("--keyword",
-                    help="站内关键词，命中标题/正文/标签/分类。"
-                         "🔴 只放**他要找的东西**，用 1-3 个短词；"
-                         "地点、时间、预算、交付方式这些**条件不要放进来**——"
-                         "检索会把条件当成帖子必须写出来的词，写进去会把结果打掉一个数量级"
-                         "（09-03 prod 实测 椅子 205 条 → Zone 2 椅子 3 条），"
-                         "而少掉的帖大多只是没写那几个字、并非不满足条件。"
-                         "条件**拿到结果之后自己筛**。"
-                         "⚠️ **例外：他只给了地点时那就是唯一线索，要传**"
-                         "（「Zone 2 有什么能自提的吗」→ 传 Zone 2）。"
-                         "口诀：**有东西传东西，没东西才传地点**。"
-                         "🔴 全站都有的词（二手/便宜/伦敦）零区分度，别传。"
-                         "英文别传介词短语：to/in/for 目前会当成实词参与匹配，"
-                         "`room to rent` 会被当成三个要命中的词，搜 `room` 就好。"
-                         "搜不到就换更短的词、中英文各试一次。不传 = 不限（看最新上架）")
-    ml.add_argument("--page", type=int)
-    ml.add_argument("--size", type=int)
+                    help="要找的东西。空格分开的每个词**都要命中**（标题权重最高，其次标签、正文），"
+                         "等价写法（IKEA/宜家）服务端自动展开，不用自己并列写。"
+                         "🔴 一次只放**一个东西**的词（「iPhone 13 Pro」可以）；不同叫法、几件不同的东西"
+                         "别塞一起，分开搜几次——多个词互相卡，结果会少一个数量级。"
+                         "🔴 只放**对方帖子里会写出来的词**：品名、品牌、型号、路线两端地名；"
+                         "颜色、成色、预算、日期这些对方未必写的**不要放**（预算用 --price-max，日期用 --created-from）。"
+                         "全站都有的词（二手/便宜/伦敦）零区分度，别传。"
+                         "原词零结果时服务端会从最后一个词起自动放宽一级，并在 data.notice 里说明——"
+                         "放宽后的结果不等于命中原词，要逐条核对。不传 = 不按词搜")
+    ml.add_argument("--page", type=int, help="第几页，从 1 开始；翻页不是重搜，同一批候选往后看")
+    ml.add_argument("--size", type=int, help="每页条数，默认 20，最多 100")
     ml.add_argument("--include-mine", action="store_true",
                     help="把自己在卖的也列进来（默认排除）")
     ml.add_argument("--trade-type", choices=["SELL", "BUY", "PEER"], default=None,
-                    help="只看某一向；不传 = 买卖混排")
+                    help="**对方帖子**的方向：主人想买/租 → SELL；主人想卖 → BUY（找求购）；"
+                         "找搭子/拼车 → PEER。近八成是 SELL，只筛它等于没筛。不传 = 混排")
     ml.add_argument("--tags", action="append", metavar="TAG",
-                    help="按标签过滤，**每个都要命中**；可重复传（--tags 物品交易 --tags 二手）。"
-                         "值是标签原文：帖子 tags[0] 是场景中文名（物品交易 / 长租房源 / 短租住宿 / "
-                         "拼车 / 帮带 / 课业辅导 / 找搭子 / 票券转让 / 招聘求职 / 物品租借 / "
-                         "行李寄存 …），其余是描述性标签（找室友 / zone2，不带 #）。"
-                         "旧的大写帖型码（RENTAL 等）服务端仍认。"
-                         "🔴 场景是服务端自动判的，判错的帖不少——带 --tags 命中偏少或为 0 时，"
+                    help="按标签精确过滤，**每个都要命中**；可重复或逗号分隔。"
+                         "帖子 tags[0] 是场景：" + " / ".join(SCENE_TAGS) + "；"
+                         "「其他」= 没有场景标签的帖。其余是描述性标签（找室友 / zone2，不带 #，大小写照原样）。"
+                         "定得了场景就带，这是把结果切窄最有效的一刀。"
+                         "🔴 场景是机器判的，漏标错标不少——带 --tags 命中偏少或为 0 时，"
                          "必须去掉它只用 --keyword 再搜一轮才能下「没有」的结论")
+    ml.add_argument("--exclude-keyword", metavar="WORDS",
+                    help="排除正文/标题里出现这些词的帖（等价写法一起排掉：排宜家也排 IKEA）")
+    ml.add_argument("--exclude-tags", action="append", metavar="TAG",
+                    help="排除带这些标签的帖；可重复或逗号分隔")
+    ml.add_argument("--post-type", choices=["SELF", "REPOST_XHS"], default=None,
+                    help="SELF = 站内原发（能直接站内联系）；REPOST_XHS = 平台从小红书转载"
+                         "（发布账号不是原卖家，联系要走原帖）。不传 = 都要")
+    ml.add_argument("--poster", metavar="WHO",
+                    help="只看某个人发的：发布者 id / 微信 id / 昵称都行。昵称会重名，不等于同一个人")
+    ml.add_argument("--price-min", type=float, help="价格下限（不含币种）")
+    ml.add_argument("--price-max", type=float,
+                    help="价格上限。🔴 **软过滤**：没标价的帖照样返回（八成以上的帖没标价），"
+                         "预算内的排在前面。「最便宜的」用它，别用 --sort price")
+    ml.add_argument("--currency", metavar="CODE",
+                    help="三位币种代码（GBP / CNY / EUR…），只约束标了价的帖")
+    ml.add_argument("--created-from", metavar="DATE",
+                    help="发布时间下限，写 2026-09-01 或 2026-09-01T08:00:00Z（不认「9月1日」）；「最近/这周新上的」用它")
+    ml.add_argument("--created-to", metavar="DATE", help="发布时间上限，格式同上")
+    ml.add_argument("--updated-from", metavar="DATE", help="最后变更时间下限，格式同上")
+    ml.add_argument("--updated-to", metavar="DATE", help="最后变更时间上限，格式同上")
+    ml.add_argument("--listing-ids", action="append", metavar="ID",
+                    help="只看这几条（重新核对点名过的帖）；可重复或逗号分隔，一次最多 50 个")
+    ml.add_argument("--keyword-in", action="append", choices=["title", "description", "tags"],
+                    help="--keyword 只在这些字段里找；可重复。正文命中只说明「文里提到」，"
+                         "租房帖的家具清单会命中「书桌」——想要真在卖的就限 title")
+    ml.add_argument("--sort", action="append", metavar="FIELD[:asc|desc]",
+                    help="排序：_score / created_at / price / updated_at，最多 3 个，不写方向默认 desc。"
+                         "🔴 默认按相关度，**写了 --sort 相关度就完全不参与**；只在主人明确要严格按时间/价格排时才用")
     ml.set_defaults(fn=cmd_market_list)
     ms = market.add_parser("show")
     ms.add_argument("listing_id")
