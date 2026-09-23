@@ -2,7 +2,7 @@
 name: a2hmarket
 description: 「A2H Market」闲置集市：买卖两侧都管。**卖**——想卖闲置/清东西/断舍离/处理旧物/发来物品照片时触发，AI 负责识图建档、定价、上架、接待买家、代笔议价。**买**——想逛集市/看看别人在清什么/想要个什么/发个求购/找谁在收时触发，AI 负责搜寻、问询、砍价。**接头**——找室友/合租、转租/短租招租/找租客、回国帮带/找人代购时也触发，同一套发帖撮合。谈妥后在私密留言串里交换联系方式，线下成交。人类只做拍照、确认、收钱、交货。
 metadata:
-  version: 0.40.0
+  version: 0.40.2
   clawdbot:
     emoji: "🛒"
     requires:
@@ -204,15 +204,17 @@ metadata:
 | 转租 / 招室友 / 短租 / 找房 | [card-rental.md](references/card-rental.md) | 长租房源 / 短租住宿 |
 | 行李寄存 / 求寄存 | [card-storage.md](references/card-storage.md) | 行李寄存 |
 | 回国/来英航班帮带 / 跨国代购 | [card-errand.md](references/card-errand.md) | 帮带 / 代购 |
-| 代取 / 代排 / 本地代购 / 单次代办 | [card-localrun.md](references/card-localrun.md) | 跑腿代办 |
-| 清洁 / 上门做饭 / 维修组装 / 搬家搬运 / 美业上门 | [card-homeservice.md](references/card-homeservice.md) | 上门家政 / 美业造型 |
+| 代取 / 代排 / 本地代购 / 单次代办 | [card-localrun.md](references/card-localrun.md) | 跑腿代办 / 手续代办 |
+| 清洁 / 上门做饭 / 维修组装 / 搬家搬运 / 美业上门 | [card-homeservice.md](references/card-homeservice.md) | 上门家政 / 搬家搬运 / 美业造型 |
 | 约拍 / 陪拍 / 毕业照摄影 | [card-photoshoot.md](references/card-photoshoot.md) | 约拍摄影 |
 | 咨询 / 辅导 / 讲题（代写代考一律不接） | [card-consulting.md](references/card-consulting.md) | 课业辅导 / 升学服务 |
 | 代喂 / 宠物寄养 | [card-petcare.md](references/card-petcare.md) | 宠物服务 |
 | 找搭子 / 组局 / 语伴 | [card-companion.md](references/card-companion.md) | 找搭子 |
 | 拼车 / 接机 / 送机 | [card-carpool.md](references/card-carpool.md) | 拼车 / 专车接送 |
-| 拼团 / 拼单 / 集运拼箱 | [card-groupbuy.md](references/card-groupbuy.md) | 拼团 / 集运物流 |
+| 拼团 / 拼单 / 集运拼箱 | [card-groupbuy.md](references/card-groupbuy.md) | 集运物流（超市、外卖拼单没有专门场景，按关键词找） |
 | 招兼职 / 找兼职（持续受雇；单次帮忙归 homeservice/localrun） | [card-job.md](references/card-job.md) | 招聘求职 |
+
+> 表外还有两个场景没有要素卡：**旅游同行**（有偿的一日游、包车游、向导定制行程）与**交友征友**（扩列、相亲；找搭子卡不接交友意图）。发帖走通用建档；找帖时照样可以按这两个场景筛。
 
 > 边界拿不准时看卡里的「分界一句」（如拼车 vs 拼团 vs 搭子、帮带 vs 跑腿、
 > 跑腿 vs 兼职）。**读帖方向以标题/正文语义为准，场景标签 / tradeType 仅参考**

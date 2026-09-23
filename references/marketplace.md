@@ -229,18 +229,20 @@ a2hmarket.py listing create --trade-type BUY \
 |---|---|---|
 | 转租·招室友 / 找房 | [card-rental.md](card-rental.md) | 长租房源 / 短租住宿 |
 | 帮带 / 求帮带（跨国航线；本地代购归跑腿代办） | [card-errand.md](card-errand.md) | 帮带 |
-| 跑腿代办 / 本地代购 | [card-localrun.md](card-localrun.md) | 跑腿代办 / 代购 |
+| 跑腿代办 / 本地代购 / 单次代办 | [card-localrun.md](card-localrun.md) | 跑腿代办 / 代购 / 手续代办 |
 | 行李寄存 | [card-storage.md](card-storage.md) | 行李寄存 |
 | 转票 / 收票 | [card-ticket.md](card-ticket.md) | 票券转让 |
 | 物品租借（学士服/相机/行李箱） | [card-lend.md](card-lend.md) | 物品租借 |
-| 上门服务（清洁/做饭/维修/搬家/美业） | [card-homeservice.md](card-homeservice.md) | 上门家政 / 美业造型 |
+| 上门服务（清洁/做饭/维修/搬家/美业） | [card-homeservice.md](card-homeservice.md) | 上门家政 / 搬家搬运 / 美业造型 |
 | 约拍摄影 | [card-photoshoot.md](card-photoshoot.md) | 约拍摄影 |
 | 咨询·辅导 | [card-consulting.md](card-consulting.md) | 课业辅导 / 升学服务 |
 | 宠物照看 | [card-petcare.md](card-petcare.md) | 宠物服务 |
 | 找搭子 / 语伴 | [card-companion.md](card-companion.md) | 找搭子 |
 | 拼车·接送机 | [card-carpool.md](card-carpool.md) | 拼车 / 专车接送 |
-| 拼团 / 集运拼箱 | [card-groupbuy.md](card-groupbuy.md) | 拼团 / 集运物流 |
+| 拼团 / 集运拼箱 | [card-groupbuy.md](card-groupbuy.md) | 集运物流（超市、外卖拼单没有专门场景，按关键词找） |
 | 兼职招/求 | [card-job.md](card-job.md) | 招聘求职 |
+
+> 表外还有两个场景没有要素卡：**旅游同行**（有偿的一日游、包车游、向导定制行程）与**交友征友**（扩列、相亲；找搭子卡不接交友意图）。发帖走通用建档；找帖时照样可以按这两个场景筛。
 
 **发帖工序（§A3 所有帖型必经——与卖二手同一套机制，只是卡的内容换了）**：
 
