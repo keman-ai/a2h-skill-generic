@@ -73,8 +73,8 @@ def is_wanted(listing: dict) -> bool:
 
 # 移植自 frontend/src/api/types.ts 的 LISTING_STATUS_LABEL + listingCopy 的 BUY 翻转表。
 # 只有非 ON_SALE 才挂状态徽章（黑底），与 Web 卡片一致。
-STATUS_LABEL = {"RESERVED": "已预定", "SOLD": "已成交", "GIFTED": "已送出", "OFFLINE": "已下架"}
-BUY_STATUS_LABEL = {"RESERVED": "已锁定", "SOLD": "已收到", "GIFTED": "已收到", "OFFLINE": "已停止"}
+STATUS_LABEL = {"RESERVED": "已预定", "SOLD": "已出", "OFFLINE": "已下架"}
+BUY_STATUS_LABEL = {"RESERVED": "已锁定", "SOLD": "已收到", "OFFLINE": "已停止"}
 
 # 移植自 frontend/src/lib/listingPrice.ts 的 CURRENCY_SYMBOL。表外币种显示「代码+空格」。
 CURRENCY_SYMBOL = {"CNY": "¥", "GBP": "£", "USD": "$", "EUR": "€", "HKD": "HK$", "SGD": "S$"}

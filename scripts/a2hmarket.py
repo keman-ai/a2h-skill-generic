@@ -1006,6 +1006,10 @@ def cmd_profile_set(args):
     phone / …自定义均可）；二维码先 `photo upload` 拿 publicUrl 当值。
     `--rule` 是可见性规则（自由文本），本版只存储、不评估——别向用户许诺它已生效。
 
+    `--preferences` 是一段自由描述：这个人是什么样的、喜欢怎么被对待（如「晚上九点后别找我，
+    只收现金」）。🔴 底价、让价幅度、急不急着出不要写进来（§1.12）。传空串 `--preferences ""` 清空。
+    档案「身份标签」09-22 已随后端删除，没有 --tag 了。
+
     `--delivery` 是**偏好成交方式**（0805），发帖时继承为帖子默认值；选了 PICKUP
     才谈得上 `--meetup` 偏好面交地点（只邮寄的人填地点没有意义）。
     """
@@ -1025,7 +1029,7 @@ def cmd_profile_set(args):
     #    `body = {...}` / `body={...}` 两种形态取键名，换名字闸就看不见了。
     body = {"contacts": contacts,
             "visibilityRule": args.rule,
-            "tags": args.tag or None,
+            "preferences": args.preferences,
             "residence": args.residence,
             "deliveryMethods": [x.strip().upper() for x in args.delivery.split(",") if x.strip()]
                                 if args.delivery else None,
@@ -1039,7 +1043,7 @@ def cmd_profile_set(args):
     #    的**全部**可写字段，漏一个就是那个字段被静默清掉。
     current = call(api_post(), "GET", "/api/v1/profile/me") or {}
     merged = {k: current.get(k) for k in
-              ("contacts", "tags", "residence", "deliveryMethods", "meetupAreas", "visibilityRule")}
+              ("contacts", "preferences", "residence", "deliveryMethods", "meetupAreas", "visibilityRule")}
     merged.update(updates)
     merged = {k: v for k, v in merged.items() if v is not None}
     emit_ok(call(api_post(), "PUT", "/api/v1/profile/me", body=merged))
@@ -1055,14 +1059,14 @@ def cmd_student_link(args):
 
     返回的 school 是域名匹配出的校名——**当场回显给主人核对**，认错学校当场能发现。
     邮件里的链接由主人**自己去学校邮箱点开**完成确认（agent 不碰主人的邮箱，红线 2 口径）；
-    确认后 `student status` 能查到，校名同时自动进档案身份标签（服务端保证）。
+    确认后 `student status` 能查到，他的帖子上会显示认证校名。
     """
     emit_ok(call(api_post(), "POST", "/api/v1/student-verification/link",
                  body={"email": args.email}))
 
 
 def cmd_student_revoke(_args):
-    """撤销自己的学生认证（换学校时用）。已写入档案的校名标签不回收，只是不再带认证。"""
+    """撤销自己的学生认证（换学校时用）。"""
     emit_ok(call(api_post(), "DELETE", "/api/v1/student-verification"))
 
 
@@ -1222,7 +1226,7 @@ _MARKET_FIELDS = (
     "priceDisplay", "price", "currency", "matchedSnippet",
     "availableUntil", "repost", "description",
     "photos", "videos", "createdAt", "updatedAt",
-    "poster", "posterNickname", "posterVerifiedSchool", "tags",
+    "poster", "posterNickname", "posterVerifiedSchool", "posterType", "tags",
 )
 
 
@@ -1881,7 +1885,7 @@ def cmd_message_pending(_args):
        每串整串），请求数 = 2 + 帖数 + 串数；本机到 prod 单请求约 2 秒且无连接复用，
        88 个活跃帖就是 3 分钟起步，必超时。判定逻辑与输出格式不变，只换数据源。
 
-    帖主侧要剔掉已完结帖子（SOLD/GIFTED/OFFLINE = group=done）下面的串——会话口不带
+    帖主侧要剔掉已完结帖子（SOLD/OFFLINE = group=done）下面的串——会话口不带
     帖子状态，先补一张完结帖集合。访客侧不剔，与旧行为一致：别人的帖子完结与否，
     不该吞掉那条还在等我回应的串。
 
@@ -2150,8 +2154,9 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--contact", action="append", metavar="类型=值",
                     help="可重复；整组替换。类型开放（wechat/wechat_qr/whatsapp/instagram/"
                          "email/phone/…）；二维码先 photo upload 拿 publicUrl 当值")
-    ps.add_argument("--tag", action="append",
-                    help="身份标签，可重复；整组替换（如 --tag UCL --tag 在职）")
+    ps.add_argument("--preferences",
+                    help="偏好，一段自由描述（如「晚上九点后别找我，只收现金」）；传空串清空。"
+                         "底价、让价幅度不要写进来")
     ps.add_argument("--residence", help="常驻地点（精确到公寓/宿舍楼/最近地铁站）")
     ps.add_argument("--delivery", help="偏好成交方式，逗号分隔 PICKUP 自提/SHIPPING 邮寄/"
                                        "LOCAL_DELIVERY 同城送；发帖时继承为帖子默认值")
@@ -2329,7 +2334,7 @@ def build_parser() -> argparse.ArgumentParser:
     lu.set_defaults(fn=cmd_listing_update)
     ls = listing.add_parser("status")
     ls.add_argument("listing_id")
-    ls.add_argument("status", help="ON_SALE/RESERVED/SOLD/GIFTED/OFFLINE")
+    ls.add_argument("status", help="ON_SALE/RESERVED/SOLD/OFFLINE（送人也用 SOLD）")
     ls.set_defaults(fn=cmd_listing_status)
     lcf = listing.add_parser("confirm")
     lcf.add_argument("listing_id")

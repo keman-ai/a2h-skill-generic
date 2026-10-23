@@ -179,7 +179,7 @@ python3 scripts/a2hmarket.py doctor
 | 品类 category | DIGITAL 数码 / APPLIANCE 家电 / BOOK 图书 / BABY 母婴玩具 / CLOTHING 服饰 / HOME 家居 / SPORTS 运动户外 / OTHER 其他 |
 | 成色 condition | NEW 全新 / LIKE_NEW 几乎全新 / LIGHT_WEAR 轻微使用痕迹 / VISIBLE_WEAR 明显使用痕迹 / FLAWED 能用有瑕疵 |
 | 交付 delivery | PICKUP 自提 / SHIPPING 邮寄 / LOCAL_DELIVERY 同城送 |
-| 商品状态 | ON_SALE 在售 / RESERVED 已预定 / SOLD 已成交 / GIFTED 已送出 / OFFLINE 已下架 |
+| 商品状态 | ON_SALE 在售 / RESERVED 已预定 / SOLD 已出（卖掉或送人）/ OFFLINE 已下架 |
 | 串状态 | NEW 新留言 / CONTACTED 已联系 / DEALT 已成交 / CLOSED 已关闭 |
 
 ## 联系方式类型开放（小红书主页也行）
@@ -209,21 +209,20 @@ python3 scripts/a2hmarket.py doctor
 
 ## 学校认证（学生邮箱，一封邮件挂 ✓）
 
-档案的身份标签是自述的；**学校认证让校名标签变成被验证过的**——认证过的用户，
-集市展示侧会在校名旁挂认证态（买家判断"同校可信"的硬依据）。全链路在对话内完成：
+学校认证让「他是这个学校的」变成被验证过的事实——认证过的用户，
+集市展示侧会在他的帖子上挂「✓ 校名 认证」（买家判断"同校可信"的硬依据）。全链路在对话内完成：
 
 1. **查状态**：`a2hmarket.py student status`——`data` 为 null 就是还没认证（正常态）；
 2. **发起**：问主人要学校邮箱 → `a2hmarket.py student link --email <学校邮箱>`。
    返回的 `school` 是域名匹配出的校名，**当场回显让主人核对**（"发往 UCL 的认证邮件已寄出"）；
 3. **主人自己去邮箱点链接**（默认 30 分钟内有效）——🔴 agent 不碰主人的邮箱（红线 2 口径），
    只说一句"去学校邮箱点一下确认链接，点完告诉我"；
-4. **收口**：主人说点完了 → 再跑 `student status` 确认 → 校名已由服务端**自动写进档案
-   身份标签**（无需再 profile set）→ 向主人报到："✓ UCL 认证完成，档案里挂上了"。
+4. **收口**：主人说点完了 → 再跑 `student status` 确认 → 向主人报到："✓ UCL 认证完成，你的帖子上会显示认证校名"。
 
 注意事项：
 
 - 一个学校邮箱只能绑一个账号；每天最多发 5 封认证邮件（频控）；
-- 换学校：`student revoke` 撤销后重新 link；已写入的旧校名标签不会被回收（降级为普通自述标签）；
+- 换学校：`student revoke` 撤销后重新 link；
 - 发起失败 `code` 对照：域名不在院校库 → 如实转告并建议联系运营补录；
   `CONFLICT` → 该邮箱已绑定其他账号；`RATE_LIMITED` → 今天的发送次数用完了；
 - **引导时机与频率**（与档案引导触点同源，见 SKILL.md）：
