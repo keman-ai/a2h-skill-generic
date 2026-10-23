@@ -11,6 +11,7 @@ HOST = "generic"
 # 动作 → 下场。bound 可用；degraded 换法子做；unavailable 做不到；
 # not_implemented 是**我们还没做**（宿主做得到），不许对用户说成做不到。
 OPERATIONS = {
+    'assistant.delegate': {'status': 'bound', 'enforcement': 'instruction', 'invoke': '宿主 agent 自己就是助手：按剧本用 CLI 各子命令把整件事办完'},
     'auth.login': {'status': 'degraded', 'enforcement': 'instruction', 'how': '照常跑 `auth login`：CLI 无条件把授权链接打到 stderr、无条件轮询兑换，用户在任意设备上打开链接完成授权即可；确知无图形界面时加 `--no-browser` 跳过那次徒劳的 webbrowser.open'},
     'auth.logout': {'status': 'bound', 'enforcement': 'instruction', 'invoke': 'a2hmarket.py auth logout'},
     'auth.status': {'status': 'bound', 'enforcement': 'instruction', 'invoke': 'a2hmarket.py auth status'},
