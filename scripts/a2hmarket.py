@@ -1221,10 +1221,12 @@ def _market_list_public(params: dict):
 # G5（2026-09-04）：card / category / itemCondition / flawNote / negotiable / location /
 # deliveryMethods / meetupAreas / attributes / photoLabels 随库列一起删除，从名单里去掉。
 # 帖型/品类在 `tags`（tags[0] = 场景名），成色/瑕疵/地点/交付方式并入 `description`。
+# `postType`（SELF / REPOST_XHS / REPOST_GUMTREE）+ `sourceUrl`（转载帖原帖链接）：转载帖从哪个站来、
+# 去哪联系，desk UI 靠它们点名小红书还是 Gumtree；MCP 投影早就有这两个（post_type / source_url）。
 _MARKET_FIELDS = (
     "listingId", "tradeType", "title", "status",
     "priceDisplay", "price", "currency", "matchedSnippet",
-    "availableUntil", "repost", "description",
+    "availableUntil", "repost", "postType", "sourceUrl", "description",
     "photos", "videos", "createdAt", "updatedAt",
     "poster", "posterNickname", "posterVerifiedSchool", "posterType", "tags",
 )
@@ -1811,17 +1813,20 @@ def cmd_message_thread_status(args):
 
 
 def _trade_role(i_am_poster: bool, trade_type: str | None) -> str:
-    """结构角色（帖主/访客）+ 帖子方向 → **业务角色**（买家/卖家）。
+    """结构角色（帖主/访客）+ 帖子方向 → **业务角色**（买家/卖家，搭子帖是发起人/参与者）。
 
     🔴 服务端 senderRole 的 SELLER/BUYER 存的是**结构**角色（谁发的帖子），却用了业务角色
        的词。两者只在出闲置帖上恰好重合，**求购帖上整个反过来**：求购帖的帖主想买东西
        （业务上是买家），来说"我有这个"的访客手里有货（业务上是卖家）。
 
-       真值表（唯一实现，别在别处再写一遍；web 侧的同款在 frontend/src/lib/tradeRole.ts）：
+       真值表（唯一实现，别在别处再写一遍；web 侧的同款在 frontend/src/lib/tradeRole.ts，
+       MCP 侧在 youxian-oauth 的 TradeRole.java，三处返回值一致）：
 
-           |          | SELL（含缺省） | BUY   |
-           | 帖主      | 卖家           | 买家  |
-           | 访客      | 买家           | 卖家  |
+           |          | SELL（含缺省） | BUY   | PEER                    |
+           | 帖主      | 卖家           | 买家  | initiator（发起人）     |
+           | 访客      | 买家           | 卖家  | participant（参与者）   |
+
+       PEER 是找搭子 / 同行这类对等帖，双方之间没有买卖，叫卖家买家都不对。
 
        判定写 == "BUY" 而不是 != "SELL"：tradeType 是可选字段，老数据没这一列时后端不下发，
        后者会把所有缺字段的旧帖全部翻成求购。
@@ -1829,6 +1834,8 @@ def _trade_role(i_am_poster: bool, trade_type: str | None) -> str:
     背景：这里以前直接 `"seller" if i_am_poster else "buyer"`，求购帖上会告诉 agent
     "你是卖家"，于是 agent 站在错误的一侧议价。详见 docs/product/trade-role-semantics.md。
     """
+    if trade_type == "PEER":
+        return "initiator" if i_am_poster else "participant"
     wanted = trade_type == "BUY"
     if i_am_poster:
         return "buyer" if wanted else "seller"
@@ -1842,6 +1849,8 @@ def _with_trade_roles(items, my_side):
 
     - `senderTradeRole` —— 说这句话的人是 `buyer` 出钱 / `seller` 出货
     - `myTradeRole`     —— 我（当前用户）在这笔交易里是 `buyer` / `seller`
+
+    搭子帖（tradeType=PEER）上两个字段是 `initiator` 发起人 / `participant` 参与者。
 
     🔴 **为什么由 CLI 算而不是让 agent 自己推**：服务端下发的 `senderRole` 是**结构**角色
        （SELLER=帖主发的 / BUYER=访客发的）却用了业务角色的词，求购帖上整个反过来

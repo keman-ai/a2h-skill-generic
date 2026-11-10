@@ -114,12 +114,13 @@ def run(*args):
 info = []
 
 # 1. 留言串待回应（按串状态判定，幂等不丢）
+ROLE_WORD = {"buyer": "买家", "seller": "卖家", "initiator": "发起人", "participant": "参与者"}
 pending = (run("message", "pending") or {}).get("pending", [])
 if pending:
     heads = "；".join(
         # lastFrom 已由 a2hmarket.py 的 _trade_role 换算成**业务**角色（求购帖上会翻转），
-        # 直接用它，不要再拿 role 反推对方是谁——那样在求购帖上会说反。
-        f"「{p.get('listingTitle','?')}」串里{('买家' if p.get('lastFrom')=='buyer' else '卖家')}说：{(p.get('lastContent') or '')[:40]}"
+        # 直接用它，不要再拿 role 反推对方是谁——那样在求购帖上会说反。搭子帖没有买卖，是发起人 / 参与者。
+        f"「{p.get('listingTitle','?')}」串里{ROLE_WORD.get(p.get('lastFrom'), '对方')}说：{(p.get('lastContent') or '')[:40]}"
         for p in pending[:3])
     more = f"（另有 {len(pending)-3} 条）" if len(pending) > 3 else ""
     info.append(f"📩 {len(pending)} 个串等你回应{more}：{heads}")

@@ -73,7 +73,7 @@ SUMMARY_MAX = 220
 PUBLIC_LISTING_FIELDS = (
     "listingId", "posterUserId", "posterNickname", "posterVerifiedSchool",
     "tradeType", "title", "description", "tags",
-    "currency", "price", "priceUnit", "priceDisplay", "repost",
+    "currency", "price", "priceUnit", "priceDisplay", "repost", "postType", "sourceUrl",
     "status", "photos", "viewCount", "availableFrom", "availableUntil", "createdAt", "updatedAt",
 )
 
@@ -140,26 +140,50 @@ def a2hmarket(*args: str) -> object:
 # 全角/半角冒号都认（同 repost.ts 的 SOURCE_LINE / XHS_URL）
 _SOURCE_LINE = re.compile(r"原帖联系卖家[：:]\s*(https?://\S+)")
 _XHS_URL = re.compile(r"https?://(?:www\.)?(?:xiaohongshu\.com|xhslink\.com)/\S+")
+# Gumtree 原帖链接的形状（同 repost.ts gumtreeSourceUrl / 后端 ImportSourcePolicy）
+_GUMTREE_PATH = re.compile(r"/p/[^/]+/[^/]+/[1-9][0-9]{0,19}/?")
+
+
+def _gumtree_url(value) -> str | None:
+    """Gumtree 原帖链接只认 https://www.gumtree.com/p/<类目>/<标题>/<编号>，别的一律不给跳。"""
+    url = str(value or "").strip()
+    try:
+        parts = urlparse(url)
+        port = parts.port
+    except ValueError:
+        return None
+    if (parts.scheme != "https" or parts.hostname != "www.gumtree.com" or parts.username
+            or parts.password or port is not None or parts.query or parts.fragment
+            or re.search(r"%2f|%5c", parts.path, re.I) or not _GUMTREE_PATH.fullmatch(parts.path)):
+        return None
+    return url
 
 
 def repost_source(listing: dict) -> tuple[bool, str | None]:
-    """(是不是转载帖, 原帖链接)。老数据只有 [转载] 前缀没链接时链接为 None。"""
+    """(是不是转载帖, 原帖链接)。老数据只有 [转载] 前缀没链接时链接为 None。
+
+    链接先读服务端 `sourceUrl` 字段（新版式的正文里已经不放链接），读不到再从正文里抠，
+    同 repost.ts。Gumtree 转载只认校验过的 `sourceUrl`，不借正文里的链接冒充来源。
+    """
+    if listing.get("postType") == "REPOST_GUMTREE":
+        return True, _gumtree_url(listing.get("sourceUrl"))
     description = listing.get("description") or ""
     match = _SOURCE_LINE.search(description)
     desc_url = match.group(1) if match else None
     if desc_url is None:
         bare = _XHS_URL.search(description)
         desc_url = bare.group(0) if bare else None
-    # 描述里的链接进 href 前把 scheme 钉死（红线 8：集市数据不许变成 javascript: 之类的可执行链接）
-    if desc_url and not desc_url.startswith(("https://", "http://")):
-        desc_url = None
+    url = str(listing.get("sourceUrl") or "").strip() or desc_url
+    # 链接进 href 前把 scheme 钉死（红线 8：集市数据不许变成 javascript: 之类的可执行链接）
+    if url and not url.startswith(("https://", "http://")):
+        url = None
     flag = listing.get("repost")
     if flag is True:
-        return True, desc_url
+        return True, url
     if flag is False:
         return False, None
     if desc_url:
-        return True, desc_url
+        return True, url
     if (listing.get("title") or "").startswith("[转载]"):
         return True, None
     return False, None
@@ -167,6 +191,23 @@ def repost_source(listing: dict) -> tuple[bool, str | None]:
 
 def is_repost(listing: dict) -> bool:
     return repost_source(listing)[0]
+
+
+def repost_platform(listing: dict) -> str | None:
+    """转载帖从哪个站来：`gumtree` / `xiaohongshu`；判不出来回 None，页面就不点名哪个站。
+
+    主判据是服务端的 `postType`（REPOST_GUMTREE / REPOST_XHS，后端 RepostRule.sourceLabel 同一字段）。
+    老载荷没带 `postType` 时，原帖链接是小红书的才算小红书；只有 [转载] 前缀的说不清，不猜。
+    """
+    post_type = listing.get("postType")
+    if post_type == "REPOST_GUMTREE":
+        return "gumtree"
+    if post_type == "REPOST_XHS":
+        return "xiaohongshu"
+    flag, url = repost_source(listing)
+    if flag and url and _XHS_URL.match(url):
+        return "xiaohongshu"
+    return None
 
 
 # ---------------------------------------------------------------- 会话状态（内存态）
@@ -332,14 +373,16 @@ def listing_view_payload(listing: dict, *, is_mine: bool = False,
     """详情页载荷。CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx）：
 
     ① 自己的帖子       → 没有 CTA（Web 端 isOwner → null）
-    ② 转载帖有原帖链接 → 「去小红书原帖联系卖家」外跳
-    ③ 转载帖没链接     → 没有 CTA（Alert 已给「去小红书搜原作者」指引，
+    ② 转载帖有原帖链接 → 「去小红书原帖联系卖家」/「去Gumtree原帖联系卖家」外跳
+                          （来源判不出就只说「去原帖联系卖家」）
+    ③ 转载帖没链接     → 没有 CTA（Alert 已给「去原站搜原帖」指引，
                           再画一颗点不动的按钮只是制造虚假预期 —— Web 端原话）
     ④ 正常             → 「查看联系方式」（0812 拍板：替代私信入口，邮箱排最前）
     """
     repost, repost_url = repost_source(listing)
     return {"listing": listing, "isMine": is_mine, "isRepost": repost,
             "repostUrl": repost_url,
+            "repostPlatform": repost_platform(listing) if repost else None,
             "canContact": not loading and not is_mine and not repost,
             "contacts": None, "contactsOpen": False, "contactsLoading": False,
             "contactError": None, "loading": loading, "loadError": load_error}
@@ -673,7 +716,8 @@ def _normalize_card(raw: dict, detail: dict) -> dict | None:
     cover = raw.get("cover") or (photos[0] if photos else None)
     listing_for_repost = dict(detail)
     listing_for_repost.update({key: raw[key] for key in
-                               ("title", "description", "repost") if key in raw})
+                               ("title", "description", "repost", "postType", "sourceUrl")
+                               if key in raw})
     tags = _value(raw, detail, "tags")
     return {
         "listingId": str(listing_id),
@@ -698,6 +742,7 @@ def _normalize_card(raw: dict, detail: dict) -> dict | None:
             "tag": seller.get("tag"),
             "nickname": seller.get("nickname") or _value(raw, detail, "posterNickname"),
             "isRepost": bool(seller.get("isRepost") or is_repost(listing_for_repost)),
+            "repostPlatform": repost_platform(listing_for_repost),
         },
         "aiNote": raw.get("aiNote"),
         "url": raw.get("url"),

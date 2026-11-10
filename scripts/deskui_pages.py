@@ -243,6 +243,10 @@ def avatar(user_id, nickname, size_class: str) -> str:
 # ---------------------------------------------------------------- 搜索结果页（2026-08 设计定稿 3a：单卡整合）
 
 
+# 转载来源站的叫法（deskui.repost_platform 的返回值 → 页面上的字）。不在表里 = 判不出来，不点名
+_REPOST_SITE = {"xiaohongshu": "小红书", "gumtree": "Gumtree"}
+
+
 def _seller_line(item: dict) -> tuple[str, str]:
     """七项⑥卖家信息：meta 行的认证段 + 底排的昵称段。转载帖标明，都没有也要写一句。
 
@@ -250,7 +254,7 @@ def _seller_line(item: dict) -> tuple[str, str]:
     """
     seller = item.get("seller") or {}
     if seller.get("isRepost"):
-        return "", "小红书转载帖"
+        return "", f'{_REPOST_SITE.get(seller.get("repostPlatform"), "")}转载帖'
     verified = seller.get("verifiedSchool")
     meta_part = f"✓ {verified} 认证" if verified else ""
     foot = (seller.get("nickname") or seller.get("tag")
@@ -359,13 +363,22 @@ def listing_view(payload: dict) -> str:
                  + (f'<div class="dchips">{"".join(chips)}</div>' if chips else "")
                  + '</section>')
 
-    # 转载 Alert 文案对齐 Web（ListingDetail.tsx）：有链接引导去原帖，没链接给搜索指引
+    # 转载 Alert 文案对齐 Web（ListingDetail.tsx）：有链接引导去原帖，没链接给搜索指引。
+    # 来源站按 repostPlatform 点名（小红书 / Gumtree）；判不出来就不点名，不默认说成小红书
+    site = _REPOST_SITE.get(payload.get("repostPlatform"), "")
     repost_alert = ""
     if payload.get("isRepost"):
-        guide = ("请点下方按钮前往原帖联系卖家。" if payload.get("repostUrl")
-                 else "请去小红书搜索标题里的原作者联系卖家。")
-        repost_alert = (f'<div class="alert"><b>转载自小红书</b>'
-                        f'这条帖子是从小红书转载的，发帖账号无法站内私信。{guide}</div>')
+        if payload.get("repostUrl"):
+            guide = "请点下方按钮前往原帖联系卖家。"
+        elif site == "小红书":
+            guide = "请去小红书搜索标题里的原作者联系卖家。"
+        elif site:
+            guide = f"请去{site}按标题搜索原帖联系卖家。"
+        else:
+            guide = "请按标题去原网站搜索原帖联系卖家。"
+        heading = f"转载自{site}" if site else "转载帖"
+        repost_alert = (f'<div class="alert"><b>{heading}</b>'
+                        f'这条帖子是从{site or "站外"}转载的，发帖账号无法站内私信。{guide}</div>')
 
     # 发帖人卡。G5 起「x 前确认在售」副行退役：refreshed_at 列已删，updated_at 改描述改价
     # 也会动，拿它冒充「确认在售」信号是错的（擦亮机制本身还没立住，0822 拍板不出站）。
@@ -380,7 +393,7 @@ def listing_view(payload: dict) -> str:
 
     # CTA 分支**照抄 Web 端 ctaLabel**（ListingDetail.tsx，null = 这一态没有 CTA）：
     # ① 自己的帖子 → 无 CTA；② 转载有链接 → 外跳原帖；③ 转载没链接 → 无 CTA
-    # （上方 Alert 已给「去小红书搜原作者」指引）；④ 正常 → 「查看联系方式」
+    # （上方 Alert 已给「去原站按标题搜原帖」指引）；④ 正常 → 「查看联系方式」
     # （0812 拍板：替代私信入口，弹层展示、邮箱最前）。
     if payload.get("canContact"):
         cta = (f'<div class="cta-dock"><button type="button" class="cta" '
@@ -389,7 +402,7 @@ def listing_view(payload: dict) -> str:
     elif payload.get("isRepost") and payload.get("repostUrl"):
         cta = (f'<div class="cta-dock"><a class="cta cta-link" '
                f'href="{esc(payload["repostUrl"])}" target="_blank" rel="noreferrer">'
-               f'去小红书原帖联系卖家</a></div>')
+               f'去{site}原帖联系卖家</a></div>')
     else:
         cta = ""
 
